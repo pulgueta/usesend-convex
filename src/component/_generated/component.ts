@@ -24,30 +24,147 @@ import type { FunctionReference } from "convex/server";
 export type ComponentApi<Name extends string | undefined = string | undefined> =
   {
     lib: {
-      add: FunctionReference<
+      cancelEmail: FunctionReference<
         "mutation",
         "internal",
-        { targetId: string; text: string; userId: string },
-        string,
+        { emailId: string },
+        null,
         Name
       >;
-      list: FunctionReference<
+      cleanupAbandonedEmails: FunctionReference<
+        "mutation",
+        "internal",
+        { olderThan?: number },
+        null,
+        Name
+      >;
+      cleanupOldEmails: FunctionReference<
+        "mutation",
+        "internal",
+        { olderThan?: number },
+        null,
+        Name
+      >;
+      cleanupOldEvents: FunctionReference<
+        "mutation",
+        "internal",
+        { olderThan?: number },
+        null,
+        Name
+      >;
+      get: FunctionReference<
         "query",
         "internal",
-        { limit?: number; targetId: string },
+        { emailId: string },
+        {
+          _creationTime: number;
+          _id: string;
+          bcc?: Array<string>;
+          bounced: boolean;
+          cc?: Array<string>;
+          clicked: boolean;
+          complained: boolean;
+          deliveryDelayed: boolean;
+          errorMessage?: string;
+          failed: boolean;
+          from: string;
+          headers?: Array<{ name: string; value: string }>;
+          html?: string;
+          metadata?: Record<string, any>;
+          opened: boolean;
+          status:
+            | "waiting"
+            | "queued"
+            | "sent"
+            | "delivery_delayed"
+            | "delivered"
+            | "bounced"
+            | "failed"
+            | "cancelled"
+            | "suppressed";
+          subject?: string;
+          template?: { id: string; variables?: Record<string, any> };
+          text?: string;
+          to: Array<string>;
+          usesendId?: string;
+        } | null,
+        Name
+      >;
+      getStatus: FunctionReference<
+        "query",
+        "internal",
+        { emailId: string },
+        {
+          bounced: boolean;
+          clicked: boolean;
+          complained: boolean;
+          deliveryDelayed: boolean;
+          errorMessage: string | null;
+          failed: boolean;
+          opened: boolean;
+          status:
+            | "waiting"
+            | "queued"
+            | "sent"
+            | "delivery_delayed"
+            | "delivered"
+            | "bounced"
+            | "failed"
+            | "cancelled"
+            | "suppressed";
+        } | null,
+        Name
+      >;
+      listByStatus: FunctionReference<
+        "query",
+        "internal",
+        {
+          limit?: number;
+          status:
+            | "waiting"
+            | "queued"
+            | "sent"
+            | "delivery_delayed"
+            | "delivered"
+            | "bounced"
+            | "failed"
+            | "cancelled"
+            | "suppressed";
+        },
         Array<{
           _creationTime: number;
           _id: string;
-          targetId: string;
-          text: string;
-          userId: string;
+          from: string;
+          status: string;
+          subject?: string;
+          to: Array<string>;
+          usesendId?: string;
         }>,
         Name
       >;
-      translate: FunctionReference<
-        "action",
+      sendEmail: FunctionReference<
+        "mutation",
         "internal",
-        { baseUrl: string; commentId: string },
+        {
+          bcc?: Array<string>;
+          cc?: Array<string>;
+          from: string;
+          headers?: Array<{ name: string; value: string }>;
+          html?: string;
+          metadata?: Record<string, any>;
+          options: {
+            apiKey: string;
+            baseUrl?: string;
+            initialBackoffMs?: number;
+            retryAttempts?: number;
+            webhookSecret?: string;
+          };
+          replyTo?: Array<string>;
+          subject?: string;
+          template?: { id: string; variables?: Record<string, any> };
+          text?: string;
+          to: Array<string>;
+        },
         string,
         Name
       >;

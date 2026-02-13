@@ -98,5 +98,10 @@
     "vitest": "3.2.4"
   },
   "types": "./dist/client/index.d.ts",
-  "module": "./dist/client/index.js"
+  "module": "./dist/client/index.js",
+  "dependencies": {
+    "@convex-dev/rate-limiter": "^0.3.2",
+    "@convex-dev/workpool": "^0.3.1",
+    "usesend-js": "^1.6.0"
+  }
 }

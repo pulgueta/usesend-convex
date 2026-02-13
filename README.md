@@ -1,91 +1,33 @@
-# Convex Component Template
+# useSend Convex Component
 
-This is a Convex component, ready to be published on npm.
+A Convex component for integrating the [useSend](https://usesend.com) email
+service - the open-source alternative to Resend.
 
-To create your own component:
+## Features
 
-1. Write code in src/component for your component. Component-specific tables,
-   queries, mutations, and actions go here.
-1. Write code in src/client for the Class that interfaces with the component.
-   This is the bridge your users will access to get information into and out of
-   your component
-1. Write example usage in example/convex/example.ts.
-1. Delete the text in this readme until `---` and flesh out the README.
-1. Publish to npm with `npm run alpha` or `npm run release`.
-
-To develop your component run a dev process in the example project:
-
-```sh
-npm i
-npm run dev
-```
-
-`npm i` will do the install and an initial build. `npm run dev` will start a
-file watcher to re-build the component, as well as the example project frontend
-and backend, which does codegen and installs the component.
-
-Modify the schema and index files in src/component/ to define your component.
-
-Write a client for using this component in src/client/index.ts.
-
-If you won't be adding frontend code (e.g. React components) to this component
-you can delete "./react" references in package.json and "src/react/" directory.
-If you will be adding frontend code, add a peer dependency on React in
-package.json.
-
-### Component Directory structure
-
-```
-.
-├── README.md           documentation of your component
-├── package.json        component name, version number, other metadata
-├── package-lock.json   Components are like libraries, package-lock.json
-│                       is .gitignored and ignored by consumers.
-├── src
-│   ├── component/
-│   │   ├── _generated/ Files here are generated for the component.
-│   │   ├── convex.config.ts  Name your component here and use other components
-│   │   ├── lib.ts    Define functions here and in new files in this directory
-│   │   └── schema.ts   schema specific to this component
-│   ├── client/
-│   │   └── index.ts    Code that needs to run in the app that uses the
-│   │                   component. Generally the app interacts directly with
-│   │                   the component's exposed API (src/component/*).
-│   └── react/          Code intended to be used on the frontend goes here.
-│       │               Your are free to delete this if this component
-│       │               does not provide code.
-│       └── index.ts
-├── example/            example Convex app that uses this component
-│   └── convex/
-│       ├── _generated/       Files here are generated for the example app.
-│       ├── convex.config.ts  Imports and uses this component
-│       ├── myFunctions.ts    Functions that use the component
-│       └── schema.ts         Example app schema
-└── dist/               Publishing artifacts will be created here.
-```
-
----
-
-# Convex Usesend
-
-[![npm version](https://badge.fury.io/js/@example%2Fusesend.svg)](https://badge.fury.io/js/@example%2Fusesend)
-
-<!-- START: Include on https://convex.dev/components -->
-
-- [ ] What is some compelling syntax as a hook?
-- [ ] Why should you use this component?
-- [ ] Links to docs / other resources?
-
-Found a bug? Feature request?
-[File it here](https://github.com/pulgueta/usesend-convex/issues).
+- **Email Sending**: Send emails via useSend's API with automatic batching and
+  rate limiting
+- **Webhook Handling**: Receive and verify useSend webhooks for delivery
+  tracking
+- **Status Tracking**: Track email delivery, opens, clicks, bounces, and
+  complaints
+- **Durable Execution**: Uses Convex workpools for reliable email delivery
+- **Resend-Compatible API**: Easy migration from Resend
+- **TypeScript**: Full type safety
 
 ## Installation
 
-Create a `convex.config.ts` file in your app's `convex/` folder and install the
-component by calling `use`:
+```bash
+npm install @pulgueta/usesend-convex
+```
 
-```ts
-// convex/convex.config.ts
+## Setup
+
+### 1. Configure Component
+
+Add to your `convex/convex.config.ts`:
+
+```typescript
 import { defineApp } from "convex/server";
 import usesend from "@pulgueta/usesend-convex/convex.config.js";
 
@@ -95,52 +37,298 @@ app.use(usesend);
 export default app;
 ```
 
-## Usage
+### 2. Set Environment Variables
 
-```ts
-import { components } from "./_generated/api";
-
-export const addComment = mutation({
-  args: { text: v.string(), targetId: v.string() },
-  handler: async (ctx, args) => {
-    return await ctx.runMutation(components.usesend.lib.add, {
-      text: args.text,
-      targetId: args.targetId,
-      userId: await getAuthUserId(ctx),
-    });
-  },
-});
+```bash
+USESEND_API_KEY=us_your_api_key
+USESEND_WEBHOOK_SECRET=whsec_your_webhook_secret
 ```
 
-See more example usage in [example.ts](./example/convex/example.ts).
+Get your API key and webhook secret from the
+[useSend dashboard](https://app.usesend.com/dev-settings/api-keys).
 
-### HTTP Routes
+### 3. Setup Webhook Endpoint
 
-You can register HTTP routes for the component to expose HTTP endpoints:
+Create `convex/http.ts`:
 
-```ts
+```typescript
 import { httpRouter } from "convex/server";
-import { registerRoutes } from "@pulgueta/usesend-convex";
+import { httpAction } from "./_generated/server";
+import { UseSend } from "@pulgueta/usesend-convex";
 import { components } from "./_generated/api";
 
 const http = httpRouter();
 
-registerRoutes(http, components.usesend, {
-  pathPrefix: "/comments",
+const usesend = new UseSend(components.usesend);
+
+http.route({
+  path: "/usesend-webhook",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    return await usesend.handleWebhook(ctx, req);
+  }),
 });
 
 export default http;
 ```
 
-This will expose a GET endpoint that returns the most recent comment as JSON.
-The endpoint requires a `targetId` query parameter. See
-[http.ts](./example/convex/http.ts) for a complete example.
+If your Convex project is `happy-leopard-123`, your webhook URL is:
 
-<!-- END: Include on https://convex.dev/components -->
-
-Run the example:
-
-```sh
-npm i
-npm run dev
 ```
+https://happy-leopard-123.convex.site/usesend-webhook
+```
+
+Configure this URL in your
+[useSend dashboard](https://app.usesend.com/webhooks).
+
+## Usage
+
+### Sending Emails
+
+```typescript
+import { components } from "./_generated/api";
+import { UseSend } from "@pulgueta/usesend-convex";
+import { internalMutation } from "./_generated/server";
+
+const usesend = new UseSend(components.usesend);
+
+export const sendWelcomeEmail = internalMutation({
+  handler: async (ctx) => {
+    const emailId = await usesend.sendEmail(ctx, {
+      from: "Welcome <welcome@yourdomain.com>",
+      to: "user@example.com",
+      subject: "Welcome!",
+      html: "<p>Welcome to our app!</p>",
+      text: "Welcome to our app!",
+    });
+
+    console.log("Email queued:", emailId);
+    return emailId;
+  },
+});
+```
+
+### Sending with Templates
+
+```typescript
+await usesend.sendEmail(ctx, {
+  from: "Your App <notifications@yourdomain.com>",
+  to: "user@example.com",
+  template: {
+    id: "your-template-id",
+    variables: {
+      name: "John Doe",
+      link: "https://yourapp.com/verify",
+    },
+  },
+});
+```
+
+### Checking Email Status
+
+```typescript
+const status = await usesend.status(ctx, emailId);
+
+if (status) {
+  console.log(status.status); // "delivered", "bounced", "sent", etc.
+  console.log(status.bounced); // boolean
+  console.log(status.failed); // boolean
+  console.log(status.complained); // boolean
+  console.log(status.opened); // boolean
+  console.log(status.clicked); // boolean
+  console.log(status.errorMessage); // error details
+}
+```
+
+### Cancelling Emails
+
+```typescript
+await usesend.cancelEmail(ctx, emailId);
+```
+
+Only emails with status "waiting" or "queued" can be cancelled.
+
+### Handling Webhook Events
+
+Register an event handler to receive notifications:
+
+```typescript
+import { UseSend, vOnEmailEventArgs } from "@pulgueta/usesend-convex";
+
+const usesend = new UseSend(components.usesend, {
+  onEmailEvent: internal.example.handleEmailEvent,
+});
+
+export const handleEmailEvent = internalMutation({
+  args: vOnEmailEventArgs,
+  handler: async (ctx, { id, event }) => {
+    switch (event.type) {
+      case "email.delivered":
+        console.log("Delivered:", event.data.to);
+        break;
+      case "email.bounced":
+        console.log("Bounced:", event.data.bounce?.message);
+        break;
+      case "email.opened":
+        console.log("Opened!");
+        break;
+      case "email.clicked":
+        console.log("Clicked:", event.data.click?.url);
+        break;
+    }
+  },
+});
+```
+
+## Configuration Options
+
+```typescript
+const usesend = new UseSend(components.usesend, {
+  // API key (defaults to USESEND_API_KEY env var)
+  apiKey: "us_your_api_key",
+
+  // Webhook secret (defaults to USESEND_WEBHOOK_SECRET env var)
+  webhookSecret: "whsec_your_secret",
+
+  // useSend base URL (for self-hosted instances)
+  baseUrl: "https://app.usesend.com",
+
+  // Retry configuration
+  retryAttempts: 3,
+  initialBackoffMs: 1000,
+
+  // Event callback
+  onEmailEvent: internal.yourModule.handleEmailEvent,
+});
+```
+
+## Supported Email Events
+
+The component handles all useSend email events:
+
+- `email.queued` - Email queued for sending
+- `email.sent` - Email sent to recipient's mail server
+- `email.delivered` - Email successfully delivered
+- `email.delivery_delayed` - Delivery is being retried
+- `email.bounced` - Email bounced
+- `email.rejected` - Email rejected
+- `email.complained` - Recipient marked as spam
+- `email.failed` - Email failed to send
+- `email.cancelled` - Scheduled email cancelled
+- `email.suppressed` - Email suppressed
+- `email.opened` - Recipient opened email
+- `email.clicked` - Recipient clicked a link
+
+## Data Cleanup
+
+The component provides cleanup functions. Run them periodically via cron jobs:
+
+```typescript
+// convex/crons.ts
+import { cronJobs } from "convex/server";
+import { internal, components } from "./_generated/api";
+
+const crons = cronJobs();
+
+crons.interval(
+  "Cleanup old useSend data",
+  { hours: 24 },
+  internal.crons.cleanupUseSend,
+);
+
+export const cleanupUseSend = internalMutation({
+  handler: async (ctx) => {
+    const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+
+    await ctx.scheduler.runAfter(0, components.usesend.lib.cleanupOldEmails, {
+      olderThan: ONE_WEEK_MS,
+    });
+
+    await ctx.scheduler.runAfter(
+      0,
+      components.usesend.lib.cleanupAbandonedEmails,
+      {
+        olderThan: 4 * ONE_WEEK_MS,
+      },
+    );
+
+    await ctx.scheduler.runAfter(0, components.usesend.lib.cleanupOldEvents, {
+      olderThan: ONE_WEEK_MS,
+    });
+  },
+});
+
+export default crons;
+```
+
+## React Hooks
+
+```tsx
+import { useEmailStatus } from "@pulgueta/usesend-convex/react";
+
+function EmailStatus({ emailId }: { emailId: string }) {
+  const { status, isLoading } = useEmailStatus(api.usesend.getStatus, emailId);
+
+  if (isLoading) return <div>Loading...</div>;
+  if (!status) return <div>Email not found</div>;
+
+  return (
+    <div>
+      <p>Status: {status.status}</p>
+      {status.delivered && <span>✓ Delivered</span>}
+      {status.opened && <span>✓ Opened</span>}
+    </div>
+  );
+}
+```
+
+## Migration from Resend
+
+This component is designed to be compatible with the `@convex-dev/resend` API:
+
+1. Replace `@convex-dev/resend` with `@pulgueta/usesend-convex`
+2. Change environment variables from `RESEND_API_KEY` to `USESEND_API_KEY`
+3. Update webhook URL in dashboard
+4. Most code should work without changes
+
+## API Reference
+
+### UseSend Class
+
+#### `sendEmail(ctx, args)`
+
+Send an email.
+
+**Args:**
+
+- `from` (string) - Sender email address
+- `to` (string | string[]) - Recipient(s)
+- `cc` (optional) - CC recipients
+- `bcc` (optional) - BCC recipients
+- `subject` (optional) - Email subject
+- `html` (optional) - HTML content
+- `text` (optional) - Plain text content
+- `template` (optional) - Template ID and variables
+- `replyTo` (optional) - Reply-to address(es)
+- `headers` (optional) - Custom headers
+- `metadata` (optional) - Custom metadata for tracking
+
+#### `status(ctx, emailId)`
+
+Get email status.
+
+#### `getEmail(ctx, emailId)`
+
+Get full email details.
+
+#### `cancelEmail(ctx, emailId)`
+
+Cancel a pending email.
+
+#### `handleWebhook(ctx, request)`
+
+Handle incoming webhook request.
+
+## License
+
+Apache-2.0

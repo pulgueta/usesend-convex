@@ -24,21 +24,11 @@ const blogPosts = [
 ];
 
 function BlogPostComments({ postId }: { postId: string }) {
-  const comments = useQuery(api.example.list, { targetId: postId });
-  const addComment = useMutation(api.example.add);
-  const translateComment = useAction(api.example.translateComment);
-  const [commentText, setCommentText] = useState("");
+  const sendEmail = useMutation(api.example.sendWelcomeEmail);
+  
+  const [to, setTo] = useState("");
+  const [name, setName] = useState("");
 
-  const handleAddComment = () => {
-    if (commentText.trim()) {
-      addComment({ text: commentText, targetId: postId });
-      setCommentText("");
-    }
-  };
-
-  const handleTranslateComment = async (commentId: string) => {
-    await translateComment({ commentId });
-  };
 
   return (
     <div
@@ -50,58 +40,19 @@ function BlogPostComments({ postId }: { postId: string }) {
       }}
     >
       <h4 style={{ marginTop: 0, marginBottom: "1rem" }}>
-        Comments ({comments?.length ?? 0})
+        Send Welcome Email
       </h4>
       <div style={{ marginBottom: "1rem" }}>
         <input
           type="text"
-          value={commentText}
-          onChange={(e) => setCommentText(e.target.value)}
+          value={to}
+          onChange={(e) => setTo(e.target.value)}
           placeholder="Enter a comment"
           style={{ marginRight: "0.5rem", padding: "0.5rem", width: "70%" }}
-          onKeyPress={(e) => e.key === "Enter" && handleAddComment()}
         />
-        <button onClick={handleAddComment}>Add Comment</button>
+        <button onClick={() => sendEmail({ to, name })}>Send Email</button>
       </div>
-      <ul style={{ textAlign: "left", listStyle: "none", padding: 0 }}>
-        {comments?.map((comment) => (
-          <li
-            key={comment._id}
-            style={{
-              marginBottom: "0.5rem",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.5rem",
-              padding: "0.5rem",
-              backgroundColor: "rgba(128, 128, 128, 0.1)",
-              borderRadius: "4px",
-            }}
-          >
-            <span style={{ flex: 1 }}>{comment.text}</span>
-            <button
-              onClick={() => handleTranslateComment(comment._id)}
-              style={{
-                padding: "0.25rem 0.5rem",
-                fontSize: "0.75rem",
-                backgroundColor: "#ff9800",
-                color: "white",
-                border: "none",
-                borderRadius: "4px",
-                cursor: "pointer",
-              }}
-            >
-              🏴‍☠️ Translate to Pirate Talk
-            </button>
-          </li>
-        ))}
-        {comments?.length === 0 && (
-          <li
-            style={{ color: "rgba(128, 128, 128, 0.8)", fontStyle: "italic" }}
-          >
-            No comments yet. Be the first to comment!
-          </li>
-        )}
-      </ul>
+      
     </div>
   );
 }
