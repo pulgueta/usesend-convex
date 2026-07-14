@@ -1,91 +1,45 @@
-# Convex Component Template
+# useSend Convex Component
 
-This is a Convex component, ready to be published on npm.
+[![npm version](https://badge.fury.io/js/@pulgueta%2Fusesend-convex.svg)](https://badge.fury.io/js/@pulgueta%2Fusesend-convex)
 
-To create your own component:
+This component is the official way to integrate the
+[useSend](https://usesend.com) email service with your Convex project. useSend
+is an open-source alternative to Resend, Sendgrid, Mailgun, and Postmark.
 
-1. Write code in src/component for your component. Component-specific tables,
-   queries, mutations, and actions go here.
-1. Write code in src/client for the Class that interfaces with the component.
-   This is the bridge your users will access to get information into and out of
-   your component
-1. Write example usage in example/convex/example.ts.
-1. Delete the text in this readme until `---` and flesh out the README.
-1. Publish to npm with `npm run alpha` or `npm run release`.
+Features:
 
-To develop your component run a dev process in the example project:
+- **Queueing**: Send as many emails as you want, as fast as you want - they'll
+  all be delivered (eventually).
+- **Batching**: Automatically batches large groups of emails and sends them to
+  useSend's `/emails/batch` endpoint efficiently.
+- **Durable execution**: Uses Convex workpools to ensure emails are eventually
+  delivered, even in the face of temporary failures or network outages.
+- **Idempotency**: Manages useSend idempotency keys to guarantee emails are
+  delivered exactly once, preventing accidental spamming from retries.
+- **Rate limiting**: Honors API rate limits established by useSend.
+- **Webhook support**: Receive real-time email delivery status updates.
+- **Full API coverage**: Contacts, contact books, domains, campaigns, and
+  analytics are available through a typed REST client (`usesend.api`).
+- **Self-hosted support**: Works with both useSend's hosted service and
+  self-hosted instances.
 
-```sh
-npm i
-npm run dev
-```
-
-`npm i` will do the install and an initial build. `npm run dev` will start a
-file watcher to re-build the component, as well as the example project frontend
-and backend, which does codegen and installs the component.
-
-Modify the schema and index files in src/component/ to define your component.
-
-Write a client for using this component in src/client/index.ts.
-
-If you won't be adding frontend code (e.g. React components) to this component
-you can delete "./react" references in package.json and "src/react/" directory.
-If you will be adding frontend code, add a peer dependency on React in
-package.json.
-
-### Component Directory structure
-
-```
-.
-├── README.md           documentation of your component
-├── package.json        component name, version number, other metadata
-├── package-lock.json   Components are like libraries, package-lock.json
-│                       is .gitignored and ignored by consumers.
-├── src
-│   ├── component/
-│   │   ├── _generated/ Files here are generated for the component.
-│   │   ├── convex.config.ts  Name your component here and use other components
-│   │   ├── lib.ts    Define functions here and in new files in this directory
-│   │   └── schema.ts   schema specific to this component
-│   ├── client/
-│   │   └── index.ts    Code that needs to run in the app that uses the
-│   │                   component. Generally the app interacts directly with
-│   │                   the component's exposed API (src/component/*).
-│   └── react/          Code intended to be used on the frontend goes here.
-│       │               Your are free to delete this if this component
-│       │               does not provide code.
-│       └── index.ts
-├── example/            example Convex app that uses this component
-│   └── convex/
-│       ├── _generated/       Files here are generated for the example app.
-│       ├── convex.config.ts  Imports and uses this component
-│       ├── myFunctions.ts    Functions that use the component
-│       └── schema.ts         Example app schema
-└── dist/               Publishing artifacts will be created here.
-```
-
----
-
-# Convex Usesend
-
-[![npm version](https://badge.fury.io/js/@example%2Fusesend.svg)](https://badge.fury.io/js/@example%2Fusesend)
-
-<!-- START: Include on https://convex.dev/components -->
-
-- [ ] What is some compelling syntax as a hook?
-- [ ] Why should you use this component?
-- [ ] Links to docs / other resources?
-
-Found a bug? Feature request?
-[File it here](https://github.com/pulgueta/usesend-convex/issues).
+See [example/convex/example.ts](./example/convex/example.ts) for a demo of how
+to incorporate this component into your application.
 
 ## Installation
 
-Create a `convex.config.ts` file in your app's `convex/` folder and install the
-component by calling `use`:
+```bash
+npm install @pulgueta/usesend-convex
+```
+
+## Get Started
+
+Create a [useSend](https://usesend.com) account and grab an API key. Set it to
+`USESEND_API_KEY` in your deployment environment.
+
+Next, add the component to your Convex app via `convex/convex.config.ts`:
 
 ```ts
-// convex/convex.config.ts
 import { defineApp } from "convex/server";
 import usesend from "@pulgueta/usesend-convex/convex.config.js";
 
@@ -95,52 +49,407 @@ app.use(usesend);
 export default app;
 ```
 
-## Usage
+Then you can use it in your Convex functions:
 
 ```ts
+// convex/emails.ts
 import { components } from "./_generated/api";
+import { UseSend } from "@pulgueta/usesend-convex";
+import { internalMutation } from "./_generated/server";
 
-export const addComment = mutation({
-  args: { text: v.string(), targetId: v.string() },
-  handler: async (ctx, args) => {
-    return await ctx.runMutation(components.usesend.lib.add, {
-      text: args.text,
-      targetId: args.targetId,
-      userId: await getAuthUserId(ctx),
+export const usesend = new UseSend(components.usesend);
+
+export const sendTestEmail = internalMutation({
+  handler: async (ctx) => {
+    await usesend.sendEmail(ctx, {
+      from: "Me <test@mydomain.com>",
+      to: "recipient@example.com",
+      subject: "Hi there",
+      html: "This is a test email",
     });
   },
 });
 ```
 
-See more example usage in [example.ts](./example/convex/example.ts).
+Then, calling `sendTestEmail` from anywhere in your app will send this test
+email.
 
-### HTTP Routes
+## Advanced Usage
 
-You can register HTTP routes for the component to expose HTTP endpoints:
+### Setting up a useSend webhook
+
+While the setup we have so far will reliably send emails, you don't have any
+feedback on anything delivering, bouncing, or triggering spam complaints. For
+that, we need to set up a webhook!
+
+On the Convex side, we need to mount an HTTP endpoint to our project to route it
+to the useSend component in `convex/http.ts`:
 
 ```ts
 import { httpRouter } from "convex/server";
-import { registerRoutes } from "@pulgueta/usesend-convex";
-import { components } from "./_generated/api";
+import { httpAction } from "./_generated/server";
+import { usesend } from "./emails";
 
 const http = httpRouter();
 
-registerRoutes(http, components.usesend, {
-  pathPrefix: "/comments",
+http.route({
+  path: "/usesend-webhook",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    return await usesend.handleUseSendEventWebhook(ctx, req);
+  }),
 });
 
 export default http;
 ```
 
-This will expose a GET endpoint that returns the most recent comment as JSON.
-The endpoint requires a `targetId` query parameter. See
-[http.ts](./example/convex/http.ts) for a complete example.
+If your Convex project is `happy-leopard-123`, you now have a useSend webhook
+for your project running at
+`https://happy-leopard-123.convex.site/usesend-webhook`.
 
-<!-- END: Include on https://convex.dev/components -->
+Navigate to the useSend dashboard and create a new webhook at that URL. Make
+sure to enable all the `email.*` events.
 
-Run the example:
+Finally, copy the webhook secret out of the useSend dashboard and set it to the
+`USESEND_WEBHOOK_SECRET` environment variable in your Convex deployment.
+
+### Registering an email status event handler
+
+If you have your webhook established, you can also register an event handler to
+get notifications when email statuses change.
+
+```ts
+import { components, internal } from "./_generated/api";
+import { internalMutation } from "./_generated/server";
+import { vOnEmailEventArgs, UseSend } from "@pulgueta/usesend-convex";
+
+export const usesend = new UseSend(components.usesend, {
+  onEmailEvent: internal.emails.handleEmailEvent,
+});
+
+export const handleEmailEvent = internalMutation({
+  args: vOnEmailEventArgs,
+  handler: async (ctx, args) => {
+    console.log(`Email ${args.id} received event:`, args.event.type);
+
+    switch (args.event.type) {
+      case "email.delivered":
+        console.log("Email delivered!");
+        break;
+      case "email.bounced":
+        console.log("Email bounced");
+        break;
+      case "email.complained":
+        console.log("Email marked as spam");
+        break;
+    }
+  },
+});
+```
+
+### UseSend component options
+
+There is a `UseSendOptions` argument to the component constructor to help
+customize its behavior:
+
+- `apiKey`: Provide the useSend API key instead of having it read from the
+  environment variable.
+- `baseUrl`: The base URL for the useSend API (defaults to
+  `https://app.usesend.com`). Set this if you're using a self-hosted useSend
+  instance.
+- `webhookSecret`: Same thing, but for the webhook secret.
+- `initialBackoffMs`: Initial backoff for retries (default: 30 seconds).
+- `retryAttempts`: Number of retry attempts (default: 5).
+- `onEmailEvent`: Your email event callback.
+
+### Using useSend Templates
+
+You can use [useSend templates](https://docs.usesend.com) to send emails with
+pre-designed templates from your useSend dashboard:
+
+```ts
+await usesend.sendEmail(ctx, {
+  from: "Me <test@mydomain.com>",
+  to: "recipient@example.com",
+  template: {
+    id: "my-template-id",
+    variables: {
+      name: "John Doe",
+      verificationLink: "https://example.com/verify?token=abc123",
+    },
+  },
+});
+```
+
+> **Note**: You cannot use both `template` and `html`/`text` in the same email.
+
+### Scheduling and threading emails
+
+Pass `scheduledAt` (ISO 8601) to have useSend deliver the email at a later
+time, or `inReplyToId` to thread it under a previously sent email:
+
+```ts
+await usesend.sendEmail(ctx, {
+  from: "Me <test@mydomain.com>",
+  to: "recipient@example.com",
+  subject: "See you tomorrow",
+  html: "<p>Reminder!</p>",
+  scheduledAt: "2026-08-01T09:00:00Z",
+});
+```
+
+Emails already handed off to useSend with a future `scheduledAt` can be
+rescheduled or cancelled through the REST API (see below) using the email's
+`usesendId`:
+
+```ts
+await usesend.api.emails.updateSchedule(usesendId, "2026-08-02T09:00:00Z");
+await usesend.api.emails.cancel(usesendId);
+```
+
+### Tracking, getting status, and cancelling emails
+
+The `sendEmail` method returns a branded type, `EmailId`. You can use this for:
+
+- Reassociating the original email during status changes in your email event
+  handler.
+- Checking on the status any time using `usesend.status(ctx, emailId)`.
+- Cancelling the email using `usesend.cancelEmail(ctx, emailId)`.
+
+```ts
+// Check email status
+const emailStatus = await usesend.status(ctx, emailId);
+if (emailStatus) {
+  console.log(emailStatus.status); // e.g., "delivered", "bounced", "sent"
+  console.log(emailStatus.bounced); // boolean
+  console.log(emailStatus.failed); // boolean
+  console.log(emailStatus.complained); // spam complaint (boolean)
+  console.log(emailStatus.deliveryDelayed); // boolean
+  console.log(emailStatus.opened); // if open tracking enabled (boolean)
+  console.log(emailStatus.clicked); // if click tracking enabled (boolean)
+  console.log(emailStatus.errorMessage); // error details (string | null)
+}
+```
+
+### Contacts, domains, campaigns, and analytics
+
+Everything the useSend REST API offers beyond durable email sending is
+available through `usesend.api`, a typed client covering contacts, contact
+books, domains, campaigns, analytics, and direct email operations. These
+methods perform HTTP calls, so they must run inside an **action**:
+
+```ts
+import { action } from "./_generated/server";
+import { v } from "convex/values";
+import { usesend } from "./emails";
+
+export const subscribe = action({
+  args: { contactBookId: v.string(), email: v.string() },
+  returns: v.string(),
+  handler: async (_ctx, args) => {
+    const { contactId } = await usesend.api.contacts.create(
+      args.contactBookId,
+      { email: args.email, subscribed: true },
+    );
+    return contactId;
+  },
+});
+```
+
+The full surface:
+
+- `usesend.api.emails` — `send`, `batch`, `get`, `list`, `updateSchedule`,
+  `cancel`. Direct sends support attachments and scheduling, and accept an
+  idempotency key: `usesend.api.emails.send(email, { idempotencyKey })`.
+- `usesend.api.contacts` — `create`, `get`, `list`, `update`, `upsert`,
+  `delete`, `bulkCreate`, `bulkDelete` (all scoped to a contact book).
+- `usesend.api.contactBooks` — `create`, `get`, `list`, `update`, `delete`.
+- `usesend.api.domains` — `create`, `get`, `list`, `verify`, `delete`.
+- `usesend.api.campaigns` — `create`, `get`, `list`, `delete`, `schedule`,
+  `pause`, `resume`.
+- `usesend.api.analytics` — `emailTimeSeries`, `reputationMetrics`.
+
+Failed requests throw a `UseSendApiError` carrying the HTTP `status` and
+response `body`. Note that emails sent through `usesend.api.emails.send` are
+not tracked by the component — use `sendEmail` (durable batching) or
+`sendEmailManually` (tracked manual send, below) for that.
+
+### Self-hosted useSend
+
+If you're running a self-hosted useSend instance, configure the `baseUrl`:
+
+```ts
+export const usesend = new UseSend(components.usesend, {
+  baseUrl: "https://your-usesend-instance.com",
+});
+```
+
+### Data retention
+
+This component retains "finalized" (delivered, cancelled, bounced) emails. It's
+your responsibility to clear out those emails on your own schedule. You can run
+`cleanupOldEmails` and `cleanupAbandonedEmails` from the dashboard or set up a
+cron job:
+
+```ts
+// in convex/crons.ts
+import { cronJobs } from "convex/server";
+import { components, internal } from "./_generated/api.js";
+import { internalMutation } from "./_generated/server.js";
+
+const crons = cronJobs();
+crons.interval(
+  "Remove old emails from the usesend component",
+  { hours: 1 },
+  internal.crons.cleanupUseSend,
+);
+
+const ONE_WEEK_MS = 7 * 24 * 60 * 60 * 1000;
+export const cleanupUseSend = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    await ctx.scheduler.runAfter(0, components.usesend.lib.cleanupOldEmails, {
+      olderThan: ONE_WEEK_MS,
+    });
+    await ctx.scheduler.runAfter(
+      0,
+      components.usesend.lib.cleanupAbandonedEmails,
+      { olderThan: 4 * ONE_WEEK_MS },
+    );
+  },
+});
+
+export default crons;
+```
+
+### Using React Email
+
+The component ships with a [React Email](https://react.email/) integration at
+`@pulgueta/usesend-convex/react-email`. Author your emails as React
+components; `sendReactEmail` renders them to email-client-safe HTML **plus a
+plain-text fallback** (better accessibility and deliverability) and enqueues
+them through the durable send pipeline.
+
+Install React Email in your app to author templates:
 
 ```sh
-npm i
+npm install react-email react-dom -E
+```
+
+Define a template (see [react.email/docs](https://react.email/docs) for the
+client-compatibility rules — no flexbox/grid, pixel-based sizing, etc.):
+
+```tsx
+// convex/emails/welcome.tsx
+import { Body, Button, Container, Head, Html, Preview, Text } from "react-email";
+
+export default function WelcomeEmail({ name }: { name: string }) {
+  return (
+    <Html lang="en">
+      <Head />
+      <Body style={{ fontFamily: "sans-serif" }}>
+        <Preview>Welcome aboard!</Preview>
+        <Container>
+          <Text>{`Welcome, ${name}!`}</Text>
+          <Button
+            href="https://example.com"
+            style={{ background: "#000", color: "#fff", padding: "12px 20px" }}
+          >
+            Get started
+          </Button>
+        </Container>
+      </Body>
+    </Html>
+  );
+}
+```
+
+Then render and send it from an action (use a Node action for maximum
+compatibility with `react-dom/server`):
+
+```tsx
+// convex/reactEmail.tsx
+"use node";
+import { internalAction } from "./_generated/server";
+import { sendReactEmail } from "@pulgueta/usesend-convex/react-email";
+import { v } from "convex/values";
+import { usesend } from "./emails";
+import WelcomeEmail from "./emails/welcome";
+
+export const sendWelcomeEmail = internalAction({
+  args: { to: v.string(), name: v.string() },
+  returns: v.string(),
+  handler: async (ctx, args) => {
+    return await sendReactEmail(usesend, ctx, {
+      from: "Onboarding <onboarding@mydomain.com>",
+      to: args.to,
+      subject: `Welcome, ${args.name}!`,
+      react: <WelcomeEmail name={args.name} />,
+    });
+  },
+});
+```
+
+If you only want the rendered output (e.g. to pass to
+`usesend.api.emails.send` with attachments), use `renderEmail`:
+
+```tsx
+import { renderEmail } from "@pulgueta/usesend-convex/react-email";
+
+const { html, text } = await renderEmail(<WelcomeEmail name="Ada" />);
+```
+
+See [example/convex/emails/welcome.tsx](./example/convex/emails/welcome.tsx)
+for a fuller template using Tailwind with `pixelBasedPreset`.
+
+### Sending emails manually
+
+If you want to bypass the component's batching (e.g. to attach files) while
+still tracking the email's delivery status through webhooks, use
+`sendEmailManually`. It records the email in the component, you perform the
+actual send in the callback (here via `usesend.api`), and the returned
+useSend ID links webhook events back to the record:
+
+```ts
+export const sendManualEmail = internalAction({
+  args: {},
+  returns: v.string(),
+  handler: async (ctx) => {
+    const from = "Acme <onboarding@example.com>";
+    const to = ["recipient@example.com"];
+    const subject = "hello world";
+
+    const emailId = await usesend.sendEmailManually(
+      ctx,
+      { from, to, subject },
+      async () => {
+        const result = await usesend.api.emails.send({
+          from,
+          to,
+          subject,
+          html: "<p>it works!</p>",
+          attachments: [{ filename: "invoice.pdf", content: base64Pdf }],
+        });
+        return result.emailId;
+      },
+    );
+    return emailId;
+  },
+});
+```
+
+## Development
+
+To develop this component:
+
+```sh
+npm install
 npm run dev
 ```
+
+This will start a file watcher to rebuild the component, as well as the example
+project frontend and backend.
+
+## License
+
+Apache-2.0
