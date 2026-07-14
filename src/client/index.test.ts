@@ -1,36 +1,53 @@
 import { describe, expect, test } from "vitest";
-import { exposeApi } from "./index.js";
-import { anyApi, type ApiFromModules } from "convex/server";
-import { components, initConvexTest } from "./setup.test.js";
+import { UseSend } from "./index.js";
 
-export const { add, list } = exposeApi(components.usesend, {
-  auth: async (ctx, _operation) => {
-    return (await ctx.auth.getUserIdentity())?.subject ?? "anonymous";
-  },
-  baseUrl: "https://pirate.monkeyness.com",
-});
+describe("UseSend client", () => {
+  test("should export UseSend class", () => {
+    expect(UseSend).toBeDefined();
+    expect(typeof UseSend).toBe("function");
+  });
 
-const testApi = (
-  anyApi as unknown as ApiFromModules<{
-    "index.test": {
-      add: typeof add;
-      list: typeof list;
-    };
-  }>
-)["index.test"];
+  test("should have correct default config", () => {
+    // Test that the class can be instantiated with mock component
+    const mockComponent = {} as any;
+    const usesend = new UseSend(mockComponent, {});
 
-describe("client tests", () => {
-  test("should be able to use client", async () => {
-    const t = initConvexTest().withIdentity({
-      subject: "user1",
+    // Check default values
+    expect(usesend.config.initialBackoffMs).toBe(30000);
+    expect(usesend.config.retryAttempts).toBe(5);
+    expect(usesend.config.baseUrl).toBe("https://app.usesend.com");
+  });
+
+  test("should accept custom options", () => {
+    const mockComponent = {} as any;
+    const usesend = new UseSend(mockComponent, {
+      apiKey: "test-api-key",
+      baseUrl: "https://custom.usesend.com",
+      initialBackoffMs: 60000,
+      retryAttempts: 10,
+      webhookSecret: "test-webhook-secret",
     });
-    const targetId = "test-subject-1";
-    await t.mutation(testApi.add, {
-      text: "My first comment",
-      targetId: targetId,
+
+    expect(usesend.config.apiKey).toBe("test-api-key");
+    expect(usesend.config.baseUrl).toBe("https://custom.usesend.com");
+    expect(usesend.config.initialBackoffMs).toBe(60000);
+    expect(usesend.config.retryAttempts).toBe(10);
+    expect(usesend.config.webhookSecret).toBe("test-webhook-secret");
+  });
+
+  test("should throw error when webhook secret is not set", async () => {
+    const mockComponent = {} as any;
+    const usesend = new UseSend(mockComponent, {
+      webhookSecret: "", // Empty secret
     });
-    const comments = await t.query(testApi.list, { targetId });
-    expect(comments).toHaveLength(1);
-    expect(comments[0].text).toBe("My first comment");
+
+    const mockRequest = new Request("http://localhost/webhook", {
+      method: "POST",
+      body: JSON.stringify({ type: "email.delivered" }),
+    });
+
+    await expect(
+      usesend.handleUseSendEventWebhook({} as any, mockRequest),
+    ).rejects.toThrow("Webhook secret is not set");
   });
 });
