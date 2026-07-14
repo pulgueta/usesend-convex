@@ -9,6 +9,8 @@
  */
 
 import type * as lib from "../lib.js";
+import type * as shared from "../shared.js";
+import type * as utils from "../utils.js";
 
 import type {
   ApiFromModules,
@@ -19,6 +21,8 @@ import { anyApi, componentsGeneric } from "convex/server";
 
 const fullApi: ApiFromModules<{
   lib: typeof lib;
+  shared: typeof shared;
+  utils: typeof utils;
 }> = anyApi as any;
 
 /**
@@ -47,4 +51,8 @@ export const internal: FilterApi<
   FunctionReference<any, "internal">
 > = anyApi as any;
 
-export const components = componentsGeneric() as unknown as {};
+export const components = componentsGeneric() as unknown as {
+  rateLimiter: import("@convex-dev/rate-limiter/_generated/component.js").ComponentApi<"rateLimiter">;
+  emailWorkpool: import("@convex-dev/workpool/_generated/component.js").ComponentApi<"emailWorkpool">;
+  callbackWorkpool: import("@convex-dev/workpool/_generated/component.js").ComponentApi<"callbackWorkpool">;
+};

@@ -1,6 +1,6 @@
 {
   "name": "@pulgueta/usesend-convex",
-  "description": "A usesend component for Convex.",
+  "description": "The Convex useSend Component - send emails durably with batching, rate limiting, and webhook support.",
   "repository": "github:pulgueta/usesend-convex",
   "homepage": "https://github.com/pulgueta/usesend-convex#readme",
   "bugs": {
@@ -10,7 +10,10 @@
   "license": "Apache-2.0",
   "keywords": [
     "convex",
-    "component"
+    "component",
+    "email",
+    "usesend",
+    "transactional-email"
   ],
   "type": "module",
   "scripts": {
@@ -48,6 +51,10 @@
       "types": "./dist/react/index.d.ts",
       "default": "./dist/react/index.js"
     },
+    "./react-email": {
+      "types": "./dist/react-email/index.d.ts",
+      "default": "./dist/react-email/index.js"
+    },
     "./test": "./src/test.ts",
     "./_generated/component.js": {
       "types": "./dist/component/_generated/component.d.ts"
@@ -65,38 +72,51 @@
     }
   },
   "peerDependencies": {
-    "convex": "^1.29.3",
-    "react": "^18.3.1 || ^19.0.0"
+    "convex": "^1.42.0",
+    "react": "^18.3.1 || ^19.0.0",
+    "react-dom": "^18.3.1 || ^19.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react-dom": {
+      "optional": true
+    }
   },
   "devDependencies": {
-    "@convex-dev/eslint-plugin": "^1.0.0",
+    "@convex-dev/auth": "^0.0.91",
+    "@convex-dev/eslint-plugin": "^1.2.0",
     "@edge-runtime/vm": "^5.0.0",
-    "@eslint/eslintrc": "^3.3.1",
-    "@eslint/js": "9.39.1",
-    "@types/node": "^20.19.25",
-    "@types/react": "^19.2.7",
+    "@eslint/eslintrc": "^3.3.5",
+    "@eslint/js": "9.39.4",
+    "@types/node": "^24.12.0",
+    "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@vitejs/plugin-react": "^5.1.1",
+    "@vitejs/plugin-react": "^5.2.0",
     "chokidar-cli": "3.0.0",
-    "convex": "1.29.3",
-    "convex-test": "0.0.40",
-    "cpy-cli": "^6.0.0",
-    "eslint": "9.39.1",
+    "convex": "1.34.0",
+    "convex-test": "0.0.41",
+    "eslint": "9.39.4",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^7.0.1",
-    "eslint-plugin-react-refresh": "^0.4.24",
-    "globals": "^16.5.0",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "globals": "^17.4.0",
     "npm-run-all2": "8.0.4",
     "path-exists-cli": "2.0.0",
-    "pkg-pr-new": "^0.0.60",
-    "prettier": "3.6.2",
-    "react": "^19.2.1",
-    "react-dom": "^19.2.1",
+    "pkg-pr-new": "^0.0.66",
+    "prettier": "3.8.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-email": "^6.8.1",
     "typescript": "5.9.3",
-    "typescript-eslint": "8.47.0",
-    "vite": "7.2.6",
-    "vitest": "3.2.4"
+    "typescript-eslint": "8.57.1",
+    "vite": "8.1.0",
+    "vitest": "4.1.0"
   },
   "types": "./dist/client/index.d.ts",
-  "module": "./dist/client/index.js"
+  "module": "./dist/client/index.js",
+  "dependencies": {
+    "@convex-dev/rate-limiter": "^0.3.2",
+    "@convex-dev/workpool": "^0.3.1",
+    "@react-email/render": "^2.1.0",
+    "convex-helpers": "^0.1.76"
+  }
 }
