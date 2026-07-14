@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { initConvexTest } from "./setup.test";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 
 describe("example", () => {
   beforeEach(async () => {
@@ -11,16 +11,14 @@ describe("example", () => {
     vi.useRealTimers();
   });
 
-  test("addComment and listComments", async () => {
-    const t = initConvexTest();
-    const targetId = "test-subject-1";
-    const commentId = await t.mutation(api.example.addComment, {
-      text: "My comment",
-      targetId,
-    });
-    expect(commentId).toBeDefined();
-    const comments = await t.query(api.example.listComments, { targetId });
-    expect(comments).toHaveLength(1);
-    expect(comments[0].text).toBe("My comment");
+  test("usesend component is initialized", async () => {
+    // The usesend component should be properly initialized
+    // We can't fully test email sending without mocking the API,
+    // but we can verify the component structure exists
+    expect(api.example.sendTestEmail).toBeDefined();
+    expect(api.example.sendTemplatedEmail).toBeDefined();
+    expect(api.example.getEmailStatus).toBeDefined();
+    expect(api.example.cancelEmail).toBeDefined();
+    expect(internal.example.handleEmailEvent).toBeDefined();
   });
 });
