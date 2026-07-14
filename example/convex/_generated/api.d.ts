@@ -8,8 +8,10 @@
  * @module
  */
 
+import type * as emails_welcome from "../emails/welcome.js";
 import type * as example from "../example.js";
 import type * as http from "../http.js";
+import type * as reactEmail from "../reactEmail.js";
 
 import type {
   ApiFromModules,
@@ -18,8 +20,10 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  "emails/welcome": typeof emails_welcome;
   example: typeof example;
   http: typeof http;
+  reactEmail: typeof reactEmail;
 }>;
 
 /**
