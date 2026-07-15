@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { initConvexTest } from "./setup.test";
 import { api, internal } from "./_generated/api";
 
 describe("example", () => {

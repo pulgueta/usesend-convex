@@ -16,6 +16,7 @@
     "transactional-email"
   ],
   "type": "module",
+  "packageManager": "pnpm@11.10.0",
   "scripts": {
     "dev": "run-p -r 'dev:*'",
     "dev:backend": "convex dev --typecheck-components",
@@ -92,7 +93,7 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.2.0",
     "chokidar-cli": "3.0.0",
-    "convex": "1.34.0",
+    "convex": "^1.42.0",
     "convex-test": "0.0.41",
     "eslint": "9.39.4",
     "eslint-plugin-react": "^7.37.5",

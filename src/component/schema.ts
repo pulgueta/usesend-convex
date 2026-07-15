@@ -1,6 +1,12 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
-import { vEventType, vOptions, vStatus, vTemplate } from "./shared.js";
+import {
+  vEmailEvent,
+  vEventType,
+  vOptions,
+  vStatus,
+  vTemplate,
+} from "./shared.js";
 
 export default defineSchema({
   content: defineTable({
@@ -12,17 +18,24 @@ export default defineSchema({
   nextBatchRun: defineTable({
     runId: v.id("_scheduled_functions"),
   }),
-  lastOptions: defineTable({
-    options: vOptions,
-  }),
   deliveryEvents: defineTable({
+    eventId: v.string(),
     emailId: v.id("emails"),
     usesendId: v.string(),
     eventType: vEventType,
     createdAt: v.string(),
     message: v.optional(v.string()),
-  }).index("by_emailId_eventType", ["emailId", "eventType"]),
+  })
+    .index("by_eventId", ["eventId"])
+    .index("by_emailId_eventType", ["emailId", "eventType"]),
+  pendingEvents: defineTable({
+    eventId: v.string(),
+    usesendId: v.string(),
+    event: vEmailEvent,
+    attempts: v.number(),
+  }).index("by_eventId", ["eventId"]),
   emails: defineTable({
+    options: vOptions,
     from: v.string(),
     to: v.union(v.array(v.string()), v.string()),
     cc: v.optional(v.array(v.string())),
@@ -45,9 +58,11 @@ export default defineSchema({
     clicked: v.optional(v.boolean()),
     usesendId: v.optional(v.string()),
     segment: v.number(),
+    retentionAnchor: v.number(),
     finalizedAt: v.number(),
   })
     .index("by_status_segment", ["status", "segment"])
+    .index("by_status_retentionAnchor", ["status", "retentionAnchor"])
     .index("by_usesendId", ["usesendId"])
     .index("by_finalizedAt", ["finalizedAt"]),
 });

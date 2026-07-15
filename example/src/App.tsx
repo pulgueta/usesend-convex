@@ -13,7 +13,9 @@ function App() {
   );
 
   // Replace .convex.cloud with .convex.site for HTTP endpoints
-  const convexUrl = import.meta.env.VITE_CONVEX_URL.replace(".cloud", ".site");
+  const convexUrl =
+    import.meta.env.VITE_CONVEX_URL?.replace(".cloud", ".site") ||
+    "https://<your-deployment>.convex.site";
 
   const handleSend = async () => {
     const id = await sendTestEmail();
@@ -47,8 +49,7 @@ function App() {
                   <strong>Error:</strong> {status.errorMessage}
                 </p>
               )}
-              {(status?.status === "waiting" ||
-                status?.status === "queued") && (
+              {status?.status === "waiting" && (
                 <button onClick={() => void cancelEmail({ emailId })}>
                   Cancel email
                 </button>

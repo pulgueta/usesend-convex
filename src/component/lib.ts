@@ -13,7 +13,6 @@ import { api, components, internal } from "./_generated/api.js";
 import { internalMutation } from "./_generated/server.js";
 import { type Id, type Doc } from "./_generated/dataModel.js";
 import {
-  ACCEPTED_EVENT_TYPES,
   type RuntimeConfig,
   vEmailEvent,
   vOptions,
@@ -23,6 +22,8 @@ import {
 import type { FunctionHandle } from "convex/server";
 import type { EmailEvent, RunMutationCtx, RunQueryCtx } from "./shared.js";
 import { attemptToParse } from "./utils.js";
+import { computeEmailUpdateFromEvent, FINALIZED_EPOCH } from "./events.js";
+import { parseBatchResponse, runtimeConfigKey } from "./batch.js";
 
 // Configuration constants
 const SEGMENT_MS = 125;
@@ -32,16 +33,25 @@ const EMAIL_POOL_SIZE = 4;
 const CALLBACK_POOL_SIZE = 4;
 const USESEND_ONE_CALL_EVERY_MS = 600;
 const FINALIZED_EMAIL_RETENTION_MS = 1000 * 60 * 60 * 24 * 7; // 7 days
-const FINALIZED_EPOCH = Number.MAX_SAFE_INTEGER;
 const ABANDONED_EMAIL_RETENTION_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
+const WEBHOOK_RETRY_DELAY_MS = 1000;
+const MAX_WEBHOOK_RETRY_ATTEMPTS = 6;
+const WEBHOOK_RETRY_MAX_DELAY_MS = 30_000;
+const ABANDONED_STATUSES: Array<"waiting" | "queued"> = ["waiting", "queued"];
 
 const PERMANENT_ERROR_CODES = new Set([
-  400, 401, 403, 404, 405, 406, 407, 408, 410, 411, 413, 414, 415, 416, 418,
-  421, 422, 426, 427, 428, 431,
+  400, 401, 403, 404, 405, 406, 407, 410, 411, 413, 414, 415, 416, 418, 422,
+  426, 427, 428, 431,
 ]);
 
 function getSegment(now: number) {
   return Math.floor(now / SEGMENT_MS);
+}
+
+function getRetentionAnchor(now: number, scheduledAt?: string) {
+  if (scheduledAt === undefined) return now;
+  const scheduledTime = Date.parse(scheduledAt);
+  return Number.isFinite(scheduledTime) ? Math.max(now, scheduledTime) : now;
 }
 
 // Workpools for durable execution
@@ -139,9 +149,11 @@ export const sendEmail = mutation({
       });
     }
 
-    const segment = getSegment(Date.now());
+    const now = Date.now();
+    const segment = getSegment(now);
 
     const emailId = await ctx.db.insert("emails", {
+      options: args.options,
       from: args.from,
       to: args.to,
       cc: args.cc,
@@ -162,10 +174,11 @@ export const sendEmail = mutation({
       opened: false,
       clicked: false,
       replyTo: args.replyTo ?? [],
+      retentionAnchor: getRetentionAnchor(now, args.scheduledAt),
       finalizedAt: FINALIZED_EPOCH,
     });
 
-    await scheduleBatchRun(ctx, args.options);
+    await scheduleBatchRun(ctx);
     return emailId;
   },
 });
@@ -173,6 +186,7 @@ export const sendEmail = mutation({
 // Create a manual email entry (for direct API calls)
 export const createManualEmail = mutation({
   args: {
+    options: vOptions,
     from: v.string(),
     to: v.union(v.array(v.string()), v.string()),
     subject: v.string(),
@@ -181,7 +195,9 @@ export const createManualEmail = mutation({
   },
   returns: v.id("emails"),
   handler: async (ctx, args) => {
+    const now = Date.now();
     const emailId = await ctx.db.insert("emails", {
+      options: args.options,
       from: args.from,
       to: Array.isArray(args.to) ? args.to : [args.to],
       subject: args.subject,
@@ -195,6 +211,7 @@ export const createManualEmail = mutation({
       opened: false,
       clicked: false,
       replyTo: args.replyTo ?? [],
+      retentionAnchor: now,
       finalizedAt: FINALIZED_EPOCH,
     });
     return emailId;
@@ -219,6 +236,7 @@ export const updateManualEmail = mutation({
       status: args.status,
       usesendId: args.usesendId,
       errorMessage: args.errorMessage,
+      ...(args.status === "failed" ? { failed: true } : {}),
       ...(finalizedAt ? { finalizedAt } : {}),
     });
   },
@@ -235,7 +253,7 @@ export const cancelEmail = mutation({
     if (!email) {
       throw new Error("Email not found");
     }
-    if (email.status !== "waiting" && email.status !== "queued") {
+    if (email.status !== "waiting") {
       throw new Error("Email has already been sent");
     }
     await ctx.db.patch(args.emailId, {
@@ -354,30 +372,76 @@ export const get = query({
 });
 
 // Schedule batch processing
-async function scheduleBatchRun(ctx: MutationCtx, options: RuntimeConfig) {
-  const lastOptions = await ctx.db.query("lastOptions").unique();
-  if (!lastOptions) {
-    await ctx.db.insert("lastOptions", { options });
-  } else {
-    const hasChanged =
-      JSON.stringify(lastOptions.options) !== JSON.stringify(options);
-    if (hasChanged) {
-      await ctx.db.replace(lastOptions._id, { options });
-    }
-  }
-
+async function scheduleBatchRun(ctx: MutationCtx) {
   const existing = await ctx.db.query("nextBatchRun").unique();
   if (existing) {
-    return;
+    const scheduled = await ctx.db.system.get(
+      "_scheduled_functions",
+      existing.runId,
+    );
+    if (
+      scheduled?.state.kind === "pending" ||
+      scheduled?.state.kind === "inProgress"
+    ) {
+      return;
+    }
+    await ctx.db.delete(existing._id);
   }
 
-  const runId = await ctx.scheduler.runAfter(
-    BASE_BATCH_DELAY,
-    internal.lib.makeBatch,
-    { reloop: false, segment: getSegment(Date.now() + BASE_BATCH_DELAY) },
-  );
+  await replaceBatchRun(ctx, BASE_BATCH_DELAY, {
+    reloop: false,
+    segment: getSegment(Date.now() + BASE_BATCH_DELAY),
+  });
+}
 
-  await ctx.db.insert("nextBatchRun", { runId });
+async function replaceBatchRun(
+  ctx: MutationCtx,
+  delay: number,
+  args: { reloop: boolean; segment: number },
+) {
+  const runId = await ctx.scheduler.runAfter(
+    delay,
+    internal.lib.makeBatch,
+    args,
+  );
+  const existing = await ctx.db.query("nextBatchRun").unique();
+  if (existing) {
+    await ctx.db.patch(existing._id, { runId });
+  } else {
+    await ctx.db.insert("nextBatchRun", { runId });
+  }
+}
+
+async function enqueueBatch(
+  ctx: MutationCtx,
+  emails: Doc<"emails">[],
+  options: RuntimeConfig,
+) {
+  for (const email of emails) {
+    await ctx.db.patch(email._id, { status: "queued" });
+  }
+
+  const delay = await getDelay(ctx);
+  await emailPool.enqueueAction(
+    ctx,
+    internal.lib.callUseSendAPIWithBatch,
+    {
+      apiKey: options.apiKey,
+      baseUrl: options.baseUrl,
+      requestTimeoutMs: options.requestTimeoutMs,
+      emails: emails.map((email) => email._id),
+    },
+    {
+      retry: {
+        maxAttempts: options.retryAttempts,
+        initialBackoffMs: options.initialBackoffMs,
+        base: 2,
+      },
+      runAfter: delay,
+      context: { emailIds: emails.map((email) => email._id) },
+      onComplete: internal.lib.onEmailComplete,
+    },
+  );
 }
 
 // Process email batches
@@ -385,12 +449,6 @@ export const makeBatch = internalMutation({
   args: { reloop: v.boolean(), segment: v.number() },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const lastOptions = await ctx.db.query("lastOptions").unique();
-    if (!lastOptions) {
-      throw new Error("No last options found -- invariant");
-    }
-    const options = lastOptions.options;
-
     const emails = await ctx.db
       .query("emails")
       .withIndex("by_status_segment", (q) =>
@@ -404,33 +462,25 @@ export const makeBatch = internalMutation({
 
     console.log(`Making a batch of ${emails.length} emails`);
 
+    const batches = new Map<
+      string,
+      { options: RuntimeConfig; emails: Doc<"emails">[] }
+    >();
     for (const email of emails) {
-      await ctx.db.patch(email._id, { status: "queued" });
+      const key = runtimeConfigKey(email.options);
+      const batch = batches.get(key);
+      if (batch) {
+        batch.emails.push(email);
+      } else {
+        batches.set(key, { options: email.options, emails: [email] });
+      }
     }
 
-    const delay = await getDelay(ctx);
+    for (const batch of batches.values()) {
+      await enqueueBatch(ctx, batch.emails, batch.options);
+    }
 
-    await emailPool.enqueueAction(
-      ctx,
-      internal.lib.callUseSendAPIWithBatch,
-      {
-        apiKey: options.apiKey,
-        baseUrl: options.baseUrl,
-        emails: emails.map((e) => e._id),
-      },
-      {
-        retry: {
-          maxAttempts: options.retryAttempts,
-          initialBackoffMs: options.initialBackoffMs,
-          base: 2,
-        },
-        runAfter: delay,
-        context: { emailIds: emails.map((e) => e._id) },
-        onComplete: internal.lib.onEmailComplete,
-      },
-    );
-
-    await ctx.scheduler.runAfter(0, internal.lib.makeBatch, {
+    await replaceBatchRun(ctx, 0, {
       reloop: true,
       segment: args.segment,
     });
@@ -447,15 +497,13 @@ async function reschedule(ctx: MutationCtx, emailsLeft: boolean) {
 
   if (!emailsLeft) {
     const batchRun = await ctx.db.query("nextBatchRun").unique();
-    if (!batchRun) {
-      throw new Error("No batch run found -- invariant");
+    if (batchRun) {
+      await ctx.db.delete(batchRun._id);
     }
-    await ctx.db.delete(batchRun._id);
   } else {
-    const segment = getSegment(Date.now() + BASE_BATCH_DELAY);
-    await ctx.scheduler.runAfter(BASE_BATCH_DELAY, internal.lib.makeBatch, {
+    await replaceBatchRun(ctx, BASE_BATCH_DELAY, {
       reloop: false,
-      segment,
+      segment: getSegment(Date.now() + BASE_BATCH_DELAY),
     });
   }
 }
@@ -471,22 +519,15 @@ async function getAllContent(
   return new Map(docs.map((doc) => [doc.id, doc.content]));
 }
 
-const vBatchReturns = v.union(
-  v.null(),
-  v.object({
-    emailIds: v.array(v.id("emails")),
-    usesendIds: v.array(v.string()),
-  }),
-);
-
 // Call useSend batch API
 export const callUseSendAPIWithBatch = internalAction({
   args: {
     apiKey: v.string(),
     baseUrl: v.string(),
+    requestTimeoutMs: v.number(),
     emails: v.array(v.id("emails")),
   },
-  returns: vBatchReturns,
+  returns: v.null(),
   handler: async (ctx, args) => {
     const batchPayload = await createUseSendBatchPayload(ctx, args.emails);
 
@@ -497,15 +538,23 @@ export const callUseSendAPIWithBatch = internalAction({
 
     const [emailIds, body] = batchPayload;
 
-    const response = await fetch(`${args.baseUrl}/api/v1/emails/batch`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${args.apiKey}`,
-        "Content-Type": "application/json",
-        "Idempotency-Key": args.emails[0].toString(),
-      },
-      body,
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), args.requestTimeoutMs);
+    let response: Response;
+    try {
+      response = await fetch(`${args.baseUrl}/api/v1/emails/batch`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${args.apiKey}`,
+          "Content-Type": "application/json",
+          "Idempotency-Key": args.emails[0].toString(),
+        },
+        body,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!response.ok) {
       if (PERMANENT_ERROR_CODES.has(response.status)) {
@@ -517,16 +566,54 @@ export const callUseSendAPIWithBatch = internalAction({
       }
       const errorText = await response.text();
       throw new Error(`useSend API error: ${errorText}`);
-    } else {
-      const data = await response.json();
-      if (!data.data) {
-        throw new Error("useSend API error: No data returned");
-      }
-      return {
-        emailIds,
-        usesendIds: data.data.map((d: { emailId: string }) => d.emailId),
-      };
     }
+
+    // useSend returns batch results in request order; validate the complete
+    // ordered response before persisting any mapping.
+    const usesendIds = parseBatchResponse(
+      await response.json(),
+      emailIds.length,
+    );
+
+    await ctx.runMutation(internal.lib.recordBatchAccepted, {
+      mappings: emailIds.map((emailId, index) => ({
+        emailId,
+        usesendId: usesendIds[index],
+      })),
+    });
+    return null;
+  },
+});
+
+export const recordBatchAccepted = internalMutation({
+  args: {
+    mappings: v.array(
+      v.object({ emailId: v.id("emails"), usesendId: v.string() }),
+    ),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    for (const { emailId, usesendId } of args.mappings) {
+      const [email, existingMapping] = await Promise.all([
+        ctx.db.get(emailId),
+        ctx.db
+          .query("emails")
+          .withIndex("by_usesendId", (q) => q.eq("usesendId", usesendId))
+          .unique(),
+      ]);
+      if (!email) {
+        throw new Error(`Email ${emailId} no longer exists`);
+      }
+      if (existingMapping && existingMapping._id !== emailId) {
+        throw new Error(`useSend email ID ${usesendId} is already mapped`);
+      }
+      const status = email.status === "queued" ? "sent" : undefined;
+      await ctx.db.patch(emailId, {
+        usesendId,
+        ...(status ? { status } : {}),
+      });
+    }
+    return null;
   },
 });
 
@@ -554,6 +641,7 @@ async function markEmailsFailedHandler(
       }
       await ctx.db.patch(emailId, {
         status: "failed",
+        failed: true,
         errorMessage: args.errorMessage,
         finalizedAt: Date.now(),
       });
@@ -567,22 +655,7 @@ export const onEmailComplete = emailPool.defineOnComplete({
   }),
   handler: async (ctx, args) => {
     if (args.result.kind === "success") {
-      const result = args.result.returnValue as {
-        emailIds: Id<"emails">[];
-        usesendIds: string[];
-      } | null;
-      if (result === null) {
-        return;
-      }
-      const { emailIds, usesendIds } = result;
-      await Promise.all(
-        emailIds.map((emailId, i) =>
-          ctx.db.patch(emailId, {
-            status: "sent",
-            usesendId: usesendIds[i],
-          }),
-        ),
-      );
+      return;
     } else if (args.result.kind === "failed") {
       await markEmailsFailedHandler(ctx, {
         emailIds: args.context.emailIds,
@@ -707,118 +780,6 @@ export const getEmailByUseSendId = internalQuery({
   },
 });
 
-// Compute email updates from webhook events
-function computeEmailUpdateFromEvent(
-  email: Doc<"emails">,
-  event: EmailEvent,
-): Doc<"emails"> | null {
-  const statusRank: Record<Doc<"emails">["status"], number> = {
-    waiting: 0,
-    queued: 1,
-    sent: 2,
-    delivery_delayed: 3,
-    delivered: 4,
-    bounced: 5,
-    failed: 5,
-    cancelled: 100,
-  };
-
-  const currentRank = statusRank[email.status];
-  const canUpgradeTo = (next: Doc<"emails">["status"]) => {
-    if (email.status === "cancelled") return false;
-    return statusRank[next] > currentRank;
-  };
-
-  if (event.type === "email.sent" || event.type === "email.queued") return null;
-
-  if (event.type === "email.clicked") {
-    if (email.clicked) return null;
-    return { ...email, clicked: true };
-  }
-
-  if (event.type === "email.failed") {
-    const statusWillChange = canUpgradeTo("failed");
-    if (!statusWillChange && email.failed) return null;
-    const updated: Doc<"emails"> = { ...email, failed: true };
-    if (statusWillChange) {
-      updated.status = "failed";
-      updated.finalizedAt = Date.now();
-    }
-    if ("failed" in event.data && event.data.failed) {
-      updated.errorMessage = event.data.failed.reason;
-    }
-    return updated;
-  }
-
-  if (event.type === "email.delivered") {
-    if (!canUpgradeTo("delivered")) return null;
-    return { ...email, status: "delivered", finalizedAt: Date.now() };
-  }
-
-  if (event.type === "email.bounced") {
-    const statusWillChange = canUpgradeTo("bounced");
-    if (!statusWillChange && email.bounced) return null;
-    const updated: Doc<"emails"> = {
-      ...email,
-      bounced: true,
-    };
-    if ("bounce" in event.data && event.data.bounce) {
-      updated.errorMessage = event.data.bounce.message;
-    }
-    if (statusWillChange) {
-      updated.status = "bounced";
-      updated.finalizedAt = Date.now();
-    }
-    return updated;
-  }
-
-  if (event.type === "email.delivery_delayed") {
-    const statusWillChange = canUpgradeTo("delivery_delayed");
-    if (!statusWillChange && email.deliveryDelayed) return null;
-    const updated: Doc<"emails"> = { ...email, deliveryDelayed: true };
-    if (statusWillChange) {
-      updated.status = "delivery_delayed";
-    }
-    return updated;
-  }
-
-  if (event.type === "email.complained") {
-    if (email.complained) return null;
-    return {
-      ...email,
-      complained: true,
-      finalizedAt:
-        email.finalizedAt === FINALIZED_EPOCH ? Date.now() : email.finalizedAt,
-    };
-  }
-
-  if (event.type === "email.opened") {
-    if (email.opened) return null;
-    return { ...email, opened: true };
-  }
-
-  if (
-    event.type === "email.rejected" ||
-    event.type === "email.rendering_failure" ||
-    event.type === "email.cancelled" ||
-    event.type === "email.suppressed"
-  ) {
-    const statusWillChange = canUpgradeTo("failed");
-    if (!statusWillChange && email.failed) return null;
-    const updated: Doc<"emails"> = { ...email, failed: true };
-    if (statusWillChange) {
-      updated.status = "failed";
-      updated.finalizedAt = Date.now();
-    }
-    if (event.type === "email.suppressed" && "suppression" in event.data) {
-      updated.errorMessage = `Suppressed: ${event.data.suppression.reason}`;
-    }
-    return updated;
-  }
-
-  return null;
-}
-
 // Handle webhook events
 export const handleEmailEvent = mutation({
   args: {
@@ -835,57 +796,114 @@ export const handleEmailEvent = mutation({
     }
 
     const event = result.data;
-    const emailId = event.data.id;
+    const seenEvent =
+      (await ctx.db
+        .query("deliveryEvents")
+        .withIndex("by_eventId", (q) => q.eq("eventId", event.id))
+        .unique()) ??
+      (await ctx.db
+        .query("pendingEvents")
+        .withIndex("by_eventId", (q) => q.eq("eventId", event.id))
+        .unique());
+    if (seenEvent) return null;
 
     const email = await ctx.db
       .query("emails")
-      .withIndex("by_usesendId", (q) => q.eq("usesendId", emailId))
+      .withIndex("by_usesendId", (q) => q.eq("usesendId", event.data.id))
       .unique();
 
     if (!email) {
-      console.info(`Email not found for usesendId: ${emailId}, ignoring...`);
-      return;
-    }
-
-    if (
-      ACCEPTED_EVENT_TYPES.includes(
-        event.type as (typeof ACCEPTED_EVENT_TYPES)[number],
-      )
-    ) {
-      await ctx.db.insert("deliveryEvents", {
-        emailId: email._id,
-        usesendId: emailId,
-        eventType: event.type as (typeof ACCEPTED_EVENT_TYPES)[number],
-        createdAt: event.createdAt,
-        message:
-          event.type === "email.bounced" && "bounce" in event.data
-            ? event.data.bounce?.message
-            : event.type === "email.failed" && "failed" in event.data
-              ? event.data.failed?.reason
-              : undefined,
+      const pendingEventId = await ctx.db.insert("pendingEvents", {
+        eventId: event.id,
+        usesendId: event.data.id,
+        event,
+        attempts: 0,
       });
+      await ctx.scheduler.runAfter(
+        WEBHOOK_RETRY_DELAY_MS,
+        internal.lib.retryEmailEvent,
+        { pendingEventId },
+      );
+      return null;
     }
 
-    const updated = computeEmailUpdateFromEvent(email, event);
-    if (updated) {
-      await ctx.db.replace(email._id, updated);
-    }
-
-    await enqueueCallbackIfExists(ctx, email, event);
+    await processEmailEvent(ctx, email, event);
+    return null;
   },
 });
+
+export const retryEmailEvent = internalMutation({
+  args: { pendingEventId: v.id("pendingEvents") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const pending = await ctx.db.get(args.pendingEventId);
+    if (!pending) return null;
+
+    const email = await ctx.db
+      .query("emails")
+      .withIndex("by_usesendId", (q) => q.eq("usesendId", pending.usesendId))
+      .unique();
+    if (email) {
+      await processEmailEvent(ctx, email, pending.event);
+      await ctx.db.delete(pending._id);
+      return null;
+    }
+
+    if (pending.attempts + 1 >= MAX_WEBHOOK_RETRY_ATTEMPTS) {
+      console.info(
+        `Email not found for usesendId: ${pending.usesendId}, discarding unmatched event ${pending.eventId}`,
+      );
+      await ctx.db.delete(pending._id);
+      return null;
+    }
+
+    const attempts = pending.attempts + 1;
+    await ctx.db.patch(pending._id, { attempts });
+    await ctx.scheduler.runAfter(
+      Math.min(
+        WEBHOOK_RETRY_DELAY_MS * 2 ** attempts,
+        WEBHOOK_RETRY_MAX_DELAY_MS,
+      ),
+      internal.lib.retryEmailEvent,
+      { pendingEventId: pending._id },
+    );
+    return null;
+  },
+});
+
+async function processEmailEvent(
+  ctx: MutationCtx,
+  email: Doc<"emails">,
+  event: EmailEvent,
+) {
+  await ctx.db.insert("deliveryEvents", {
+    eventId: event.id,
+    emailId: email._id,
+    usesendId: event.data.id,
+    eventType: event.type,
+    createdAt: event.createdAt,
+    message:
+      event.type === "email.bounced"
+        ? event.data.bounce.message
+        : event.type === "email.failed"
+          ? event.data.failed.reason
+          : undefined,
+  });
+
+  const patch = computeEmailUpdateFromEvent(email, event);
+  if (patch) {
+    await ctx.db.patch(email._id, patch);
+  }
+  await enqueueCallbackIfExists(ctx, email, event);
+}
 
 async function enqueueCallbackIfExists(
   ctx: MutationCtx,
   email: Doc<"emails">,
   event: EmailEvent,
 ) {
-  const lastOptions = await ctx.db.query("lastOptions").unique();
-  if (!lastOptions) {
-    return;
-  }
-  if (lastOptions.options.onEmailEvent) {
-    const handle = lastOptions.options.onEmailEvent.fnHandle as FunctionHandle<
+  if (email.options.onEmailEvent) {
+    const handle = email.options.onEmailEvent.fnHandle as FunctionHandle<
       "mutation",
       {
         id: Id<"emails">;
@@ -922,13 +940,20 @@ export const cleanupAbandonedEmails = mutation({
   args: { olderThan: v.optional(v.number()) },
   returns: v.null(),
   handler: async (ctx, args) => {
+    const CLEANUP_BATCH_SIZE = 250;
     const olderThan = args.olderThan ?? ABANDONED_EMAIL_RETENTION_MS;
-    const oldAndAbandoned = await ctx.db
-      .query("emails")
-      .withIndex("by_creation_time", (q) =>
-        q.lt("_creationTime", Date.now() - olderThan),
-      )
-      .take(500);
+    const cutoff = Date.now() - olderThan;
+    const [waiting, queued] = await Promise.all(
+      ABANDONED_STATUSES.map((status) =>
+        ctx.db
+          .query("emails")
+          .withIndex("by_status_retentionAnchor", (q) =>
+            q.eq("status", status).lt("retentionAnchor", cutoff),
+          )
+          .take(CLEANUP_BATCH_SIZE),
+      ),
+    );
+    const oldAndAbandoned = [...waiting, ...queued];
 
     for (const email of oldAndAbandoned) {
       await cleanupEmail(ctx, email);
@@ -936,10 +961,14 @@ export const cleanupAbandonedEmails = mutation({
     if (oldAndAbandoned.length > 0) {
       console.log(`Cleaned up ${oldAndAbandoned.length} abandoned emails`);
     }
-    if (oldAndAbandoned.length === 500) {
+    if (
+      waiting.length === CLEANUP_BATCH_SIZE ||
+      queued.length === CLEANUP_BATCH_SIZE
+    ) {
       await ctx.scheduler.runAfter(0, api.lib.cleanupAbandonedEmails, {
         olderThan,
       });
     }
+    return null;
   },
 });

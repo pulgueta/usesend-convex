@@ -10,23 +10,23 @@ importers:
     dependencies:
       '@convex-dev/rate-limiter':
         specifier: ^0.3.2
-        version: 0.3.2(convex@1.34.0(react@19.2.7))(react@19.2.7)
+        version: 0.3.2(convex@1.42.1(react@19.2.7))(react@19.2.7)
       '@convex-dev/workpool':
         specifier: ^0.3.1
-        version: 0.3.2(convex-helpers@0.1.120(@standard-schema/spec@1.1.0)(convex@1.34.0(react@19.2.7))(react@19.2.7)(typescript@5.9.3)(zod@4.4.3))(convex@1.34.0(react@19.2.7))
+        version: 0.3.2(convex-helpers@0.1.120(@standard-schema/spec@1.1.0)(convex@1.42.1(react@19.2.7))(react@19.2.7)(typescript@5.9.3)(zod@4.4.3))(convex@1.42.1(react@19.2.7))
       '@react-email/render':
         specifier: ^2.1.0
         version: 2.1.0(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       convex-helpers:
         specifier: ^0.1.76
-        version: 0.1.120(@standard-schema/spec@1.1.0)(convex@1.34.0(react@19.2.7))(react@19.2.7)(typescript@5.9.3)(zod@4.4.3)
+        version: 0.1.120(@standard-schema/spec@1.1.0)(convex@1.42.1(react@19.2.7))(react@19.2.7)(typescript@5.9.3)(zod@4.4.3)
     devDependencies:
       '@convex-dev/auth':
         specifier: ^0.0.91
-        version: 0.0.91(@auth/core@0.37.4)(convex@1.34.0(react@19.2.7))(react@19.2.7)
+        version: 0.0.91(@auth/core@0.37.4)(convex@1.42.1(react@19.2.7))(react@19.2.7)
       '@convex-dev/eslint-plugin':
         specifier: ^1.2.0
-        version: 1.2.2(convex@1.34.0(react@19.2.7))(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
+        version: 1.2.2(convex@1.42.1(react@19.2.7))(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
       '@edge-runtime/vm':
         specifier: ^5.0.0
         version: 5.0.0
@@ -47,16 +47,16 @@ importers:
         version: 19.2.3(@types/react@19.2.17)
       '@vitejs/plugin-react':
         specifier: ^5.2.0
-        version: 5.2.0(vite@8.1.0(@types/node@24.13.3)(esbuild@0.27.0)(jiti@2.6.1))
+        version: 5.2.0(vite@8.1.0(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.6.1))
       chokidar-cli:
         specifier: 3.0.0
         version: 3.0.0
       convex:
-        specifier: 1.34.0
-        version: 1.34.0(react@19.2.7)
+        specifier: ^1.42.0
+        version: 1.42.1(react@19.2.7)
       convex-test:
         specifier: 0.0.41
-        version: 0.0.41(convex@1.34.0(react@19.2.7))
+        version: 0.0.41(convex@1.42.1(react@19.2.7))
       eslint:
         specifier: 9.39.4
         version: 9.39.4(jiti@2.6.1)
@@ -101,10 +101,10 @@ importers:
         version: 8.57.1(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
       vite:
         specifier: 8.1.0
-        version: 8.1.0(@types/node@24.13.3)(esbuild@0.27.0)(jiti@2.6.1)
+        version: 8.1.0(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.6.1)
       vitest:
         specifier: 4.1.0
-        version: 4.1.0(@edge-runtime/vm@5.0.0)(@types/node@24.13.3)(vite@8.1.0(@types/node@24.13.3)(esbuild@0.27.0)(jiti@2.6.1))
+        version: 4.1.0(@edge-runtime/vm@5.0.0)(@types/node@24.13.3)(vite@8.1.0(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.6.1))
 
 packages:
 
@@ -1297,18 +1297,21 @@ packages:
     peerDependencies:
       convex: ^1.16.4
 
-  convex@1.34.0:
-    resolution: {integrity: sha512-TbC509Z4urZMChZR2aLPgalQ8gMhAYSz2VMxaYsCvba8YqB0Uxma7zWnXwRn7aEGXuA8ro5/uHgD1IJ0HhYYPg==}
+  convex@1.42.1:
+    resolution: {integrity: sha512-yFKp4xerVuBwQqpuTtvosOk9F/fX0twZs+Xti3oj/MlwPUU90QuhgCYo/I2wvFBAFwXsmx9tXpf2q8ekh1+3ug==}
     engines: {node: '>=18.0.0', npm: '>=7.0.0'}
     hasBin: true
     peerDependencies:
       '@auth0/auth0-react': ^2.0.1
       '@clerk/clerk-react': ^4.12.8 || ^5.0.0
+      '@clerk/react': ^6.4.3
       react: ^18.0.0 || ^19.0.0-0 || ^19.0.0
     peerDependenciesMeta:
       '@auth0/auth0-react':
         optional: true
       '@clerk/clerk-react':
+        optional: true
+      '@clerk/react':
         optional: true
       react:
         optional: true
@@ -2942,18 +2945,6 @@ packages:
   wrappy@1.0.2:
     resolution: {integrity: sha512-l4Sp/DRseor9wL6EvV2+TuQn63dMkPjZ/sp9XkghTEbV9KlPS1xUsZ3u7/IQO4wxtcFB4bgpQPRcR3QCvezPcQ==}
 
-  ws@8.18.0:
-    resolution: {integrity: sha512-8VbfWfHLbbwu3+N6OKsOMpBdT4kXPDDB9cJk2bJ6mh9ucxdlnNvH1e+roYkKmN9Nxw2yjz7VzeO9oOz2zJ04Pw==}
-    engines: {node: '>=10.0.0'}
-    peerDependencies:
-      bufferutil: ^4.0.1
-      utf-8-validate: '>=5.0.2'
-    peerDependenciesMeta:
-      bufferutil:
-        optional: true
-      utf-8-validate:
-        optional: true
-
   ws@8.21.0:
     resolution: {integrity: sha512-Vsp28b7DRcimFQvrqu2Wek3z1iYxDCWqHYB8Qsnk/S4RfaCQzPGPyBNuVjJV3cd6UiKtUtp6sNM77gWvzcCH+g==}
     engines: {node: '>=10.0.0'}
@@ -3163,12 +3154,12 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
-  '@convex-dev/auth@0.0.91(@auth/core@0.37.4)(convex@1.34.0(react@19.2.7))(react@19.2.7)':
+  '@convex-dev/auth@0.0.91(@auth/core@0.37.4)(convex@1.42.1(react@19.2.7))(react@19.2.7)':
     dependencies:
       '@auth/core': 0.37.4
       '@oslojs/crypto': 1.0.1
       '@oslojs/encoding': 1.1.0
-      convex: 1.34.0(react@19.2.7)
+      convex: 1.42.1(react@19.2.7)
       cookie: 1.1.1
       is-network-error: 1.3.2
       jose: 5.10.0
@@ -3180,26 +3171,26 @@ snapshots:
     optionalDependencies:
       react: 19.2.7
 
-  '@convex-dev/eslint-plugin@1.2.2(convex@1.34.0(react@19.2.7))(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)':
+  '@convex-dev/eslint-plugin@1.2.2(convex@1.42.1(react@19.2.7))(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)':
     dependencies:
       '@typescript-eslint/types': 8.58.2
       '@typescript-eslint/utils': 8.58.2(eslint@9.39.4(jiti@2.6.1))(typescript@5.9.3)
-      convex: 1.34.0(react@19.2.7)
+      convex: 1.42.1(react@19.2.7)
     transitivePeerDependencies:
       - eslint
       - supports-color
       - typescript
 
-  '@convex-dev/rate-limiter@0.3.2(convex@1.34.0(react@19.2.7))(react@19.2.7)':
+  '@convex-dev/rate-limiter@0.3.2(convex@1.42.1(react@19.2.7))(react@19.2.7)':
     dependencies:
-      convex: 1.34.0(react@19.2.7)
+      convex: 1.42.1(react@19.2.7)
     optionalDependencies:
       react: 19.2.7
 
-  '@convex-dev/workpool@0.3.2(convex-helpers@0.1.120(@standard-schema/spec@1.1.0)(convex@1.34.0(react@19.2.7))(react@19.2.7)(typescript@5.9.3)(zod@4.4.3))(convex@1.34.0(react@19.2.7))':
+  '@convex-dev/workpool@0.3.2(convex-helpers@0.1.120(@standard-schema/spec@1.1.0)(convex@1.42.1(react@19.2.7))(react@19.2.7)(typescript@5.9.3)(zod@4.4.3))(convex@1.42.1(react@19.2.7))':
     dependencies:
-      convex: 1.34.0(react@19.2.7)
-      convex-helpers: 0.1.120(@standard-schema/spec@1.1.0)(convex@1.34.0(react@19.2.7))(react@19.2.7)(typescript@5.9.3)(zod@4.4.3)
+      convex: 1.42.1(react@19.2.7)
+      convex-helpers: 0.1.120(@standard-schema/spec@1.1.0)(convex@1.42.1(react@19.2.7))(react@19.2.7)(typescript@5.9.3)(zod@4.4.3)
 
   '@edge-runtime/primitives@6.0.0': {}
 
@@ -3837,7 +3828,7 @@ snapshots:
       '@typescript-eslint/types': 8.58.2
       eslint-visitor-keys: 5.0.1
 
-  '@vitejs/plugin-react@5.2.0(vite@8.1.0(@types/node@24.13.3)(esbuild@0.27.0)(jiti@2.6.1))':
+  '@vitejs/plugin-react@5.2.0(vite@8.1.0(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.6.1))':
     dependencies:
       '@babel/core': 7.29.7
       '@babel/plugin-transform-react-jsx-self': 7.29.7(@babel/core@7.29.7)
@@ -3845,7 +3836,7 @@ snapshots:
       '@rolldown/pluginutils': 1.0.0-rc.3
       '@types/babel__core': 7.20.5
       react-refresh: 0.18.0
-      vite: 8.1.0(@types/node@24.13.3)(esbuild@0.27.0)(jiti@2.6.1)
+      vite: 8.1.0(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.6.1)
     transitivePeerDependencies:
       - supports-color
 
@@ -3858,13 +3849,13 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.0
 
-  '@vitest/mocker@4.1.0(vite@8.1.0(@types/node@24.13.3)(esbuild@0.27.0)(jiti@2.6.1))':
+  '@vitest/mocker@4.1.0(vite@8.1.0(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.6.1))':
     dependencies:
       '@vitest/spy': 4.1.0
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 8.1.0(@types/node@24.13.3)(esbuild@0.27.0)(jiti@2.6.1)
+      vite: 8.1.0(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.6.1)
 
   '@vitest/pretty-format@4.1.0':
     dependencies:
@@ -4147,24 +4138,24 @@ snapshots:
 
   convert-source-map@2.0.0: {}
 
-  convex-helpers@0.1.120(@standard-schema/spec@1.1.0)(convex@1.34.0(react@19.2.7))(react@19.2.7)(typescript@5.9.3)(zod@4.4.3):
+  convex-helpers@0.1.120(@standard-schema/spec@1.1.0)(convex@1.42.1(react@19.2.7))(react@19.2.7)(typescript@5.9.3)(zod@4.4.3):
     dependencies:
-      convex: 1.34.0(react@19.2.7)
+      convex: 1.42.1(react@19.2.7)
     optionalDependencies:
       '@standard-schema/spec': 1.1.0
       react: 19.2.7
       typescript: 5.9.3
       zod: 4.4.3
 
-  convex-test@0.0.41(convex@1.34.0(react@19.2.7)):
+  convex-test@0.0.41(convex@1.42.1(react@19.2.7)):
     dependencies:
-      convex: 1.34.0(react@19.2.7)
+      convex: 1.42.1(react@19.2.7)
 
-  convex@1.34.0(react@19.2.7):
+  convex@1.42.1(react@19.2.7):
     dependencies:
       esbuild: 0.27.0
       prettier: 3.8.1
-      ws: 8.18.0
+      ws: 8.21.0
     optionalDependencies:
       react: 19.2.7
     transitivePeerDependencies:
@@ -5875,7 +5866,7 @@ snapshots:
 
   vary@1.1.2: {}
 
-  vite@8.1.0(@types/node@24.13.3)(esbuild@0.27.0)(jiti@2.6.1):
+  vite@8.1.0(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.6.1):
     dependencies:
       lightningcss: 1.32.0
       picomatch: 4.0.5
@@ -5884,14 +5875,14 @@ snapshots:
       tinyglobby: 0.2.17
     optionalDependencies:
       '@types/node': 24.13.3
-      esbuild: 0.27.0
+      esbuild: 0.28.1
       fsevents: 2.3.3
       jiti: 2.6.1
 
-  vitest@4.1.0(@edge-runtime/vm@5.0.0)(@types/node@24.13.3)(vite@8.1.0(@types/node@24.13.3)(esbuild@0.27.0)(jiti@2.6.1)):
+  vitest@4.1.0(@edge-runtime/vm@5.0.0)(@types/node@24.13.3)(vite@8.1.0(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.6.1)):
     dependencies:
       '@vitest/expect': 4.1.0
-      '@vitest/mocker': 4.1.0(vite@8.1.0(@types/node@24.13.3)(esbuild@0.27.0)(jiti@2.6.1))
+      '@vitest/mocker': 4.1.0(vite@8.1.0(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.6.1))
       '@vitest/pretty-format': 4.1.0
       '@vitest/runner': 4.1.0
       '@vitest/snapshot': 4.1.0
@@ -5908,7 +5899,7 @@ snapshots:
       tinyexec: 1.2.4
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.0
-      vite: 8.1.0(@types/node@24.13.3)(esbuild@0.27.0)(jiti@2.6.1)
+      vite: 8.1.0(@types/node@24.13.3)(esbuild@0.28.1)(jiti@2.6.1)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@edge-runtime/vm': 5.0.0
@@ -5983,8 +5974,6 @@ snapshots:
       strip-ansi: 5.2.0
 
   wrappy@1.0.2: {}
-
-  ws@8.18.0: {}
 
   ws@8.21.0: {}
 

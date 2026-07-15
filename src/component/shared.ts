@@ -1,7 +1,7 @@
 import { literals } from "convex-helpers/validators";
 import {
+  type GenericActionCtx,
   type GenericDataModel,
-  type GenericMutationCtx,
   type GenericQueryCtx,
 } from "convex/server";
 import { type Infer, v } from "convex/values";
@@ -35,6 +35,7 @@ export type Template = Infer<typeof vTemplate>;
 export const vOptions = v.object({
   initialBackoffMs: v.number(),
   retryAttempts: v.number(),
+  requestTimeoutMs: v.number(),
   apiKey: v.string(),
   baseUrl: v.string(),
   onEmailEvent: v.optional(onEmailEvent),
@@ -244,5 +245,5 @@ export type RunQueryCtx = {
   runQuery: GenericQueryCtx<GenericDataModel>["runQuery"];
 };
 export type RunMutationCtx = {
-  runMutation: GenericMutationCtx<GenericDataModel>["runMutation"];
+  runMutation: GenericActionCtx<GenericDataModel>["runMutation"];
 };

@@ -8,6 +8,8 @@
  * @module
  */
 
+import type * as batch from "../batch.js";
+import type * as events from "../events.js";
 import type * as lib from "../lib.js";
 import type * as shared from "../shared.js";
 import type * as utils from "../utils.js";
@@ -20,6 +22,8 @@ import type {
 import { anyApi, componentsGeneric } from "convex/server";
 
 const fullApi: ApiFromModules<{
+  batch: typeof batch;
+  events: typeof events;
   lib: typeof lib;
   shared: typeof shared;
   utils: typeof utils;

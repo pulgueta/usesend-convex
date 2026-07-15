@@ -49,6 +49,7 @@ function getDefaultConfig(): Config {
     webhookSecret: process.env.USESEND_WEBHOOK_SECRET ?? "",
     initialBackoffMs: 30000,
     retryAttempts: 5,
+    requestTimeoutMs: 30000,
   };
 }
 
@@ -84,6 +85,9 @@ export type UseSendOptions = {
    */
   retryAttempts?: number;
 
+  /** Maximum time to wait for a useSend API response. Defaults to 30 seconds. */
+  requestTimeoutMs?: number;
+
   /**
    * A mutation to run after an email event occurs.
    * The mutation will be passed the email id and the event.
@@ -114,6 +118,7 @@ async function configToRuntimeConfig(
     baseUrl: config.baseUrl,
     initialBackoffMs: config.initialBackoffMs,
     retryAttempts: config.retryAttempts,
+    requestTimeoutMs: config.requestTimeoutMs,
     onEmailEvent: onEmailEvent
       ? { fnHandle: await createFunctionHandle(onEmailEvent) }
       : undefined,
@@ -273,7 +278,15 @@ export class UseSend {
       initialBackoffMs:
         options?.initialBackoffMs ?? defaultConfig.initialBackoffMs,
       retryAttempts: options?.retryAttempts ?? defaultConfig.retryAttempts,
+      requestTimeoutMs:
+        options?.requestTimeoutMs ?? defaultConfig.requestTimeoutMs,
     };
+    if (
+      !Number.isFinite(this.config.requestTimeoutMs) ||
+      this.config.requestTimeoutMs <= 0
+    ) {
+      throw new Error("Request timeout must be a positive finite number");
+    }
     if (options?.onEmailEvent) {
       this.onEmailEvent = options.onEmailEvent;
     }
@@ -292,6 +305,7 @@ export class UseSend {
     this._api ??= new UseSendApi({
       apiKey: this.config.apiKey,
       baseUrl: this.config.baseUrl,
+      requestTimeoutMs: this.config.requestTimeoutMs,
     });
     return this._api;
   }
@@ -354,6 +368,7 @@ export class UseSend {
     const emailId = (await ctx.runMutation(
       this.component.lib.createManualEmail,
       {
+        options: await configToRuntimeConfig(this.config, this.onEmailEvent),
         from: options.from,
         to: options.to,
         subject: options.subject,
@@ -361,13 +376,9 @@ export class UseSend {
         headers: options.headers,
       },
     )) as EmailId;
+    let usesendId: string;
     try {
-      const usesendId = await sendCallback(emailId);
-      await ctx.runMutation(this.component.lib.updateManualEmail, {
-        emailId,
-        status: "sent",
-        usesendId,
-      });
+      usesendId = await sendCallback(emailId);
     } catch (error) {
       await ctx.runMutation(this.component.lib.updateManualEmail, {
         emailId,
@@ -383,7 +394,13 @@ export class UseSend {
       throw error;
     }
 
-    return emailId as EmailId;
+    await ctx.runMutation(this.component.lib.updateManualEmail, {
+      emailId,
+      status: "sent",
+      usesendId,
+    });
+
+    return emailId;
   }
 
   /**

@@ -51,6 +51,14 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         {
           from: string;
           headers?: Record<string, string>;
+          options: {
+            apiKey: string;
+            baseUrl: string;
+            initialBackoffMs: number;
+            onEmailEvent?: { fnHandle: string };
+            requestTimeoutMs: number;
+            retryAttempts: number;
+          };
           replyTo?: Array<string>;
           subject: string;
           to: Array<string> | string;
@@ -146,6 +154,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
             baseUrl: string;
             initialBackoffMs: number;
             onEmailEvent?: { fnHandle: string };
+            requestTimeoutMs: number;
             retryAttempts: number;
           };
           replyTo?: Array<string>;

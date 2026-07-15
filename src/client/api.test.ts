@@ -19,6 +19,7 @@ describe("UseSendApi", () => {
     mockFetch();
   });
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -29,6 +30,40 @@ describe("UseSendApi", () => {
 
   test("throws when API key is empty", () => {
     expect(() => new UseSendApi({ apiKey: "" })).toThrow("API key is not set");
+  });
+
+  test("throws when request timeout is invalid", () => {
+    expect(
+      () => new UseSendApi({ apiKey: "key", requestTimeoutMs: 0 }),
+    ).toThrow("Request timeout must be a positive finite number");
+  });
+
+  test("aborts requests that exceed the configured timeout", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(
+      (_url: URL, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener("abort", () => {
+            reject(new DOMException("The operation was aborted", "AbortError"));
+          });
+        }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const timedApi = new UseSendApi({
+      apiKey: "key",
+      requestTimeoutMs: 50,
+    });
+
+    const request = timedApi.domains.list();
+    const rejection = expect(request).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    await vi.advanceTimersByTimeAsync(50);
+    await rejection;
+
+    const { init } = requestOf(fetchMock);
+    expect(init.signal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   test("defaults to the hosted useSend base URL", async () => {

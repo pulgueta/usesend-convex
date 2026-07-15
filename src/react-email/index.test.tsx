@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 import { Button, Html, Text } from "react-email";
 import { renderEmail, sendReactEmail } from "./index.js";
-import { UseSend } from "../client/index.js";
+import { type UseSendComponent, UseSend } from "../client/index.js";
 
 function TestEmail({ name }: { name: string }) {
   return (
@@ -29,7 +29,9 @@ describe("renderEmail", () => {
 
 describe("sendReactEmail", () => {
   test("renders the element and enqueues html + text through the component", async () => {
-    const mockComponent = { lib: { sendEmail: "sendEmail" } } as any;
+    const mockComponent = {
+      lib: { sendEmail: "sendEmail" },
+    } as unknown as UseSendComponent;
     const usesend = new UseSend(mockComponent, { apiKey: "test-api-key" });
     const runMutation = vi.fn().mockResolvedValue("email_1");
 

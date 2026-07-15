@@ -1,6 +1,6 @@
 import { action, internalMutation, mutation, query } from "./_generated/server.js";
 import { components, internal } from "./_generated/api.js";
-import { UseSend, vOnEmailEventArgs, vStatus } from "@pulgueta/usesend-convex";
+import { type EmailId, UseSend, vOnEmailEventArgs, vStatus } from "@pulgueta/usesend-convex";
 import { v } from "convex/values";
 
 // Handle email events from webhook
@@ -106,7 +106,7 @@ export const getEmailStatus = query({
     v.null(),
   ),
   handler: async (ctx, args) => {
-    return await usesend.status(ctx, args.emailId as any);
+    return await usesend.status(ctx, args.emailId as EmailId);
   },
 });
 
@@ -115,7 +115,7 @@ export const cancelEmail = mutation({
   args: { emailId: v.string() },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await usesend.cancelEmail(ctx, args.emailId as any);
+    await usesend.cancelEmail(ctx, args.emailId as EmailId);
   },
 });
 

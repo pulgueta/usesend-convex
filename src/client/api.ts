@@ -24,6 +24,8 @@ export class UseSendApiError extends Error {
 
 type QueryValue = string | number | string[] | undefined;
 
+const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
+
 /* Emails */
 
 export type ApiEmailStatus =
@@ -320,13 +322,24 @@ export type ReputationMetrics = {
 export class UseSendApi {
   private readonly apiKey: string;
   private readonly baseUrl: string;
+  private readonly requestTimeoutMs: number;
 
-  constructor(options: { apiKey: string; baseUrl?: string }) {
+  constructor(options: {
+    apiKey: string;
+    baseUrl?: string;
+    requestTimeoutMs?: number;
+  }) {
     if (options.apiKey === "") {
       throw new Error("API key is not set");
     }
+    const requestTimeoutMs =
+      options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0) {
+      throw new Error("Request timeout must be a positive finite number");
+    }
     this.apiKey = options.apiKey;
     this.baseUrl = options.baseUrl ?? "https://app.usesend.com";
+    this.requestTimeoutMs = requestTimeoutMs;
   }
 
   private async request<T>(
@@ -354,11 +367,22 @@ export class UseSendApi {
       headers["Idempotency-Key"] = options.idempotencyKey;
     }
 
-    const response = await fetch(url, {
-      method,
-      headers,
-      body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method,
+        headers,
+        body:
+          options?.body !== undefined
+            ? JSON.stringify(options.body)
+            : undefined,
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!response.ok) {
       throw new UseSendApiError(

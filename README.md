@@ -160,6 +160,8 @@ customize its behavior:
 - `webhookSecret`: Same thing, but for the webhook secret.
 - `initialBackoffMs`: Initial backoff for retries (default: 30 seconds).
 - `retryAttempts`: Number of retry attempts (default: 5).
+- `requestTimeoutMs`: Maximum time to wait for a useSend API response (default:
+  30 seconds).
 - `onEmailEvent`: Your email event callback.
 
 ### Using useSend Templates
@@ -214,7 +216,9 @@ The `sendEmail` method returns a branded type, `EmailId`. You can use this for:
 - Reassociating the original email during status changes in your email event
   handler.
 - Checking on the status any time using `usesend.status(ctx, emailId)`.
-- Cancelling the email using `usesend.cancelEmail(ctx, emailId)`.
+- Cancelling a `waiting` email using `usesend.cancelEmail(ctx, emailId)`. Once
+  batching starts, useSend may already be processing it and local cancellation
+  is no longer safe.
 
 ```ts
 // Check email status
@@ -443,8 +447,8 @@ export const sendManualEmail = internalAction({
 To develop this component:
 
 ```sh
-npm install
-npm run dev
+pnpm install
+pnpm dev
 ```
 
 This will start a file watcher to rebuild the component, as well as the example
