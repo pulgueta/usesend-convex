@@ -2,9 +2,9 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { UseSendApi, UseSendApiError } from "./api.js";
 
 function mockFetch(status = 200, body: unknown = {}) {
-  const fetchMock = vi.fn().mockResolvedValue(
-    new Response(JSON.stringify(body), { status }),
-  );
+  const fetchMock = vi
+    .fn()
+    .mockResolvedValue(new Response(JSON.stringify(body), { status }));
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
@@ -124,6 +124,21 @@ describe("UseSendApi", () => {
     const { url, init } = requestOf(fetchMock);
     expect(url.pathname).toBe("/api/v1/contactBooks/book_1/contacts/contact_1");
     expect(init.method).toBe("PUT");
+  });
+
+  test("encodes resource IDs as individual path segments", async () => {
+    const fetchMock = mockFetch();
+    await api.emails.get("../domains");
+    const { url } = requestOf(fetchMock);
+    expect(url.pathname).toBe("/api/v1/emails/..%2Fdomains");
+  });
+
+  test("rejects dot-only resource IDs before making a request", async () => {
+    const fetchMock = mockFetch();
+    await expect(api.contactBooks.get("..")).rejects.toThrow(
+      "API resource ID cannot be a dot segment",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   test("sends a body on bulk contact deletes", async () => {

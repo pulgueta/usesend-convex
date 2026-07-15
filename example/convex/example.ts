@@ -1,7 +1,28 @@
-import { action, internalMutation, mutation, query } from "./_generated/server.js";
+import {
+  action,
+  internalMutation,
+  mutation,
+  query,
+  type ActionCtx,
+  type MutationCtx,
+  type QueryCtx,
+} from "./_generated/server.js";
 import { components, internal } from "./_generated/api.js";
-import { type EmailId, UseSend, vOnEmailEventArgs, vStatus } from "@pulgueta/usesend-convex";
+import {
+  type EmailId,
+  UseSend,
+  vOnEmailEventArgs,
+  vStatus,
+} from "@pulgueta/usesend-convex";
 import { v } from "convex/values";
+
+type AuthenticatedCtx = Pick<ActionCtx | MutationCtx | QueryCtx, "auth">;
+
+async function requireAuthenticatedUser(ctx: AuthenticatedCtx) {
+  if (!(await ctx.auth.getUserIdentity())) {
+    throw new Error("Authentication required");
+  }
+}
 
 // Handle email events from webhook
 // NOTE: This must be defined BEFORE the usesend instance to avoid circular reference issues
@@ -54,6 +75,7 @@ export const sendTestEmail = mutation({
   args: {},
   returns: v.string(),
   handler: async (ctx) => {
+    await requireAuthenticatedUser(ctx);
     const emailId = await usesend.sendEmail(ctx, {
       from: "Test <test@yourdomain.com>",
       to: "recipient@example.com",
@@ -74,6 +96,7 @@ export const sendTemplatedEmail = mutation({
   },
   returns: v.string(),
   handler: async (ctx, args) => {
+    await requireAuthenticatedUser(ctx);
     const emailId = await usesend.sendEmail(ctx, {
       from: "Notifications <notifications@yourdomain.com>",
       to: args.to,
@@ -106,6 +129,7 @@ export const getEmailStatus = query({
     v.null(),
   ),
   handler: async (ctx, args) => {
+    await requireAuthenticatedUser(ctx);
     return await usesend.status(ctx, args.emailId as EmailId);
   },
 });
@@ -115,6 +139,7 @@ export const cancelEmail = mutation({
   args: { emailId: v.string() },
   returns: v.null(),
   handler: async (ctx, args) => {
+    await requireAuthenticatedUser(ctx);
     await usesend.cancelEmail(ctx, args.emailId as EmailId);
   },
 });
@@ -130,7 +155,8 @@ export const listDomains = action({
       status: v.string(),
     }),
   ),
-  handler: async () => {
+  handler: async (ctx) => {
+    await requireAuthenticatedUser(ctx);
     const domains = await usesend.api.domains.list();
     return domains.map((d) => ({ id: d.id, name: d.name, status: d.status }));
   },
@@ -143,7 +169,8 @@ export const subscribeContact = action({
     firstName: v.optional(v.string()),
   },
   returns: v.string(),
-  handler: async (_ctx, args) => {
+  handler: async (ctx, args) => {
+    await requireAuthenticatedUser(ctx);
     const { contactId } = await usesend.api.contacts.create(
       args.contactBookId,
       {

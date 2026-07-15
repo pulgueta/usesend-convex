@@ -26,6 +26,10 @@ type QueryValue = string | number | string[] | undefined;
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
+function encodePathSegment(value: string | number): string {
+  return encodeURIComponent(String(value));
+}
+
 /* Emails */
 
 export type ApiEmailStatus =
@@ -351,6 +355,11 @@ export class UseSendApi {
       idempotencyKey?: string;
     },
   ): Promise<T> {
+    if (
+      path.split("/").some((segment) => segment === "." || segment === "..")
+    ) {
+      throw new Error("API resource ID cannot be a dot segment");
+    }
     const url = new URL(`${this.baseUrl}/api/v1${path}`);
     for (const [key, value] of Object.entries(options?.query ?? {})) {
       if (value === undefined) continue;
@@ -420,7 +429,7 @@ export class UseSendApi {
 
     /** Retrieves an email with its full event history. */
     get: (emailId: string) =>
-      this.request<EmailDetail>("GET", `/emails/${emailId}`),
+      this.request<EmailDetail>("GET", `/emails/${encodePathSegment(emailId)}`),
 
     list: (params?: ListEmailsParams) =>
       this.request<{ data: EmailSummary[]; count: number }>("GET", "/emails", {
@@ -429,33 +438,38 @@ export class UseSendApi {
 
     /** Reschedules a scheduled email. */
     updateSchedule: (emailId: string, scheduledAt: string) =>
-      this.request<{ emailId: string }>("PATCH", `/emails/${emailId}`, {
-        body: { scheduledAt },
-      }),
+      this.request<{ emailId: string }>(
+        "PATCH",
+        `/emails/${encodePathSegment(emailId)}`,
+        { body: { scheduledAt } },
+      ),
 
     /** Cancels a scheduled email. */
     cancel: (emailId: string) =>
-      this.request<{ emailId: string }>("POST", `/emails/${emailId}/cancel`),
+      this.request<{ emailId: string }>(
+        "POST",
+        `/emails/${encodePathSegment(emailId)}/cancel`,
+      ),
   };
 
   readonly contacts = {
     create: (contactBookId: string, contact: CreateContactRequest) =>
       this.request<{ contactId: string }>(
         "POST",
-        `/contactBooks/${contactBookId}/contacts`,
+        `/contactBooks/${encodePathSegment(contactBookId)}/contacts`,
         { body: contact },
       ),
 
     get: (contactBookId: string, contactId: string) =>
       this.request<Contact>(
         "GET",
-        `/contactBooks/${contactBookId}/contacts/${contactId}`,
+        `/contactBooks/${encodePathSegment(contactBookId)}/contacts/${encodePathSegment(contactId)}`,
       ),
 
     list: (contactBookId: string, params?: ListContactsParams) =>
       this.request<Contact[]>(
         "GET",
-        `/contactBooks/${contactBookId}/contacts`,
+        `/contactBooks/${encodePathSegment(contactBookId)}/contacts`,
         { query: { ...params } },
       ),
 
@@ -466,7 +480,7 @@ export class UseSendApi {
     ) =>
       this.request<{ contactId: string }>(
         "PATCH",
-        `/contactBooks/${contactBookId}/contacts/${contactId}`,
+        `/contactBooks/${encodePathSegment(contactBookId)}/contacts/${encodePathSegment(contactId)}`,
         { body: updates },
       ),
 
@@ -478,21 +492,21 @@ export class UseSendApi {
     ) =>
       this.request<{ contactId: string }>(
         "PUT",
-        `/contactBooks/${contactBookId}/contacts/${contactId}`,
+        `/contactBooks/${encodePathSegment(contactBookId)}/contacts/${encodePathSegment(contactId)}`,
         { body: contact },
       ),
 
     delete: (contactBookId: string, contactId: string) =>
       this.request<{ success: boolean }>(
         "DELETE",
-        `/contactBooks/${contactBookId}/contacts/${contactId}`,
+        `/contactBooks/${encodePathSegment(contactBookId)}/contacts/${encodePathSegment(contactId)}`,
       ),
 
     /** Creates up to 1000 contacts in a single request. */
     bulkCreate: (contactBookId: string, contacts: CreateContactRequest[]) =>
       this.request<{ message: string; count: number }>(
         "POST",
-        `/contactBooks/${contactBookId}/contacts/bulk`,
+        `/contactBooks/${encodePathSegment(contactBookId)}/contacts/bulk`,
         { body: contacts },
       ),
 
@@ -500,7 +514,7 @@ export class UseSendApi {
     bulkDelete: (contactBookId: string, contactIds: string[]) =>
       this.request<{ success: boolean; count: number }>(
         "DELETE",
-        `/contactBooks/${contactBookId}/contacts/bulk`,
+        `/contactBooks/${encodePathSegment(contactBookId)}/contacts/bulk`,
         { body: { contactIds } },
       ),
   };
@@ -512,19 +526,24 @@ export class UseSendApi {
       }),
 
     get: (contactBookId: string) =>
-      this.request<ContactBook>("GET", `/contactBooks/${contactBookId}`),
+      this.request<ContactBook>(
+        "GET",
+        `/contactBooks/${encodePathSegment(contactBookId)}`,
+      ),
 
     list: () => this.request<ContactBook[]>("GET", "/contactBooks"),
 
     update: (contactBookId: string, updates: UpdateContactBookRequest) =>
-      this.request<ContactBook>("PATCH", `/contactBooks/${contactBookId}`, {
-        body: updates,
-      }),
+      this.request<ContactBook>(
+        "PATCH",
+        `/contactBooks/${encodePathSegment(contactBookId)}`,
+        { body: updates },
+      ),
 
     delete: (contactBookId: string) =>
       this.request<{ id: string; success: boolean; message: string }>(
         "DELETE",
-        `/contactBooks/${contactBookId}`,
+        `/contactBooks/${encodePathSegment(contactBookId)}`,
       ),
   };
 
@@ -533,18 +552,21 @@ export class UseSendApi {
       this.request<Domain>("POST", "/domains", { body: { name, region } }),
 
     get: (domainId: number) =>
-      this.request<Domain>("GET", `/domains/${domainId}`),
+      this.request<Domain>("GET", `/domains/${encodePathSegment(domainId)}`),
 
     list: () => this.request<Domain[]>("GET", "/domains"),
 
     /** Triggers DNS verification for the domain. */
     verify: (domainId: number) =>
-      this.request<{ message: string }>("PUT", `/domains/${domainId}/verify`),
+      this.request<{ message: string }>(
+        "PUT",
+        `/domains/${encodePathSegment(domainId)}/verify`,
+      ),
 
     delete: (domainId: number) =>
       this.request<{ id: number; success: boolean; message: string }>(
         "DELETE",
-        `/domains/${domainId}`,
+        `/domains/${encodePathSegment(domainId)}`,
       ),
   };
 
@@ -553,7 +575,10 @@ export class UseSendApi {
       this.request<Campaign>("POST", "/campaigns", { body: campaign }),
 
     get: (campaignId: string) =>
-      this.request<Campaign>("GET", `/campaigns/${campaignId}`),
+      this.request<Campaign>(
+        "GET",
+        `/campaigns/${encodePathSegment(campaignId)}`,
+      ),
 
     list: (params?: ListCampaignsParams) =>
       this.request<{ campaigns: CampaignSummary[]; totalPage: number }>(
@@ -563,26 +588,29 @@ export class UseSendApi {
       ),
 
     delete: (campaignId: string) =>
-      this.request<Campaign>("DELETE", `/campaigns/${campaignId}`),
+      this.request<Campaign>(
+        "DELETE",
+        `/campaigns/${encodePathSegment(campaignId)}`,
+      ),
 
     /** Schedules the campaign, or sends immediately when no time is given. */
     schedule: (campaignId: string, options?: ScheduleCampaignRequest) =>
       this.request<{ success: boolean }>(
         "POST",
-        `/campaigns/${campaignId}/schedule`,
+        `/campaigns/${encodePathSegment(campaignId)}/schedule`,
         { body: options ?? {} },
       ),
 
     pause: (campaignId: string) =>
       this.request<{ success: boolean }>(
         "POST",
-        `/campaigns/${campaignId}/pause`,
+        `/campaigns/${encodePathSegment(campaignId)}/pause`,
       ),
 
     resume: (campaignId: string) =>
       this.request<{ success: boolean }>(
         "POST",
-        `/campaigns/${campaignId}/resume`,
+        `/campaigns/${encodePathSegment(campaignId)}/resume`,
       ),
   };
 
