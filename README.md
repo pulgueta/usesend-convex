@@ -95,7 +95,7 @@ import { usesend } from "./emails";
 const http = httpRouter();
 
 http.route({
-  path: "/usesend-webhook",
+  path: "/usesend/webhook",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
     return await usesend.handleUseSendEventWebhook(ctx, req);
@@ -107,7 +107,7 @@ export default http;
 
 If your Convex project is `happy-leopard-123`, you now have a useSend webhook
 for your project running at
-`https://happy-leopard-123.convex.site/usesend-webhook`.
+`https://happy-leopard-123.convex.site/usesend/webhook`.
 
 Navigate to the useSend dashboard and create a new webhook at that URL. Make
 sure to enable all the `email.*` events.
