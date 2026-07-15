@@ -1,7 +1,10 @@
 {
   "name": "@pulgueta/usesend-convex",
   "description": "The Convex useSend Component - send emails durably with batching, rate limiting, and webhook support.",
-  "repository": "github:pulgueta/usesend-convex",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pulgueta/usesend-convex.git"
+  },
   "homepage": "https://github.com/pulgueta/usesend-convex#readme",
   "bugs": {
     "url": "https://github.com/pulgueta/usesend-convex/issues"
