@@ -66,6 +66,38 @@ describe("UseSendApi", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  test("keeps the timeout active while reading the response body", async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn((_url: URL, init: RequestInit) => {
+      const body = new ReadableStream({
+        start(controller) {
+          init.signal?.addEventListener("abort", () => {
+            controller.error(
+              new DOMException("The operation was aborted", "AbortError"),
+            );
+          });
+        },
+      });
+      return Promise.resolve(new Response(body));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const timedApi = new UseSendApi({
+      apiKey: "key",
+      requestTimeoutMs: 50,
+    });
+
+    const request = timedApi.domains.list();
+    const rejection = expect(request).rejects.toMatchObject({
+      name: "AbortError",
+    });
+    await vi.advanceTimersByTimeAsync(50);
+    await rejection;
+
+    const { init } = requestOf(fetchMock);
+    expect(init.signal?.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   test("defaults to the hosted useSend base URL", async () => {
     const fetchMock = mockFetch();
     await new UseSendApi({ apiKey: "key" }).domains.list();

@@ -24,7 +24,9 @@ Features:
   self-hosted instances.
 
 See [example/convex/example.ts](./example/convex/example.ts) for a demo of how
-to incorporate this component into your application.
+to incorporate this component into your application. Its public demo functions
+require Convex authentication and only allow the identity whose token identifier
+matches `USESEND_EXAMPLE_ADMIN_TOKEN_IDENTIFIER`.
 
 ## Installation
 

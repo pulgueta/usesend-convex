@@ -16,11 +16,18 @@ import {
 } from "@pulgueta/usesend-convex";
 import { v } from "convex/values";
 
-type AuthenticatedCtx = Pick<ActionCtx | MutationCtx | QueryCtx, "auth">;
+type AuthorizedCtx = Pick<ActionCtx | MutationCtx | QueryCtx, "auth">;
 
-async function requireAuthenticatedUser(ctx: AuthenticatedCtx) {
-  if (!(await ctx.auth.getUserIdentity())) {
-    throw new Error("Authentication required");
+async function requireExampleAdmin(ctx: AuthorizedCtx) {
+  const identity = await ctx.auth.getUserIdentity();
+  const adminTokenIdentifier =
+    process.env.USESEND_EXAMPLE_ADMIN_TOKEN_IDENTIFIER;
+  if (
+    !identity ||
+    !adminTokenIdentifier ||
+    identity.tokenIdentifier !== adminTokenIdentifier
+  ) {
+    throw new Error("Administrator access required");
   }
 }
 
@@ -38,7 +45,7 @@ export const handleEmailEvent = internalMutation({
         console.log("Email was delivered successfully!");
         break;
       case "email.bounced":
-        console.log("Email bounced:", args.event.data);
+        console.log("Email bounced", { eventId: args.event.id });
         break;
       case "email.complained":
         console.log("Email marked as spam");
@@ -75,7 +82,7 @@ export const sendTestEmail = mutation({
   args: {},
   returns: v.string(),
   handler: async (ctx) => {
-    await requireAuthenticatedUser(ctx);
+    await requireExampleAdmin(ctx);
     const emailId = await usesend.sendEmail(ctx, {
       from: "Test <test@yourdomain.com>",
       to: "recipient@example.com",
@@ -96,7 +103,7 @@ export const sendTemplatedEmail = mutation({
   },
   returns: v.string(),
   handler: async (ctx, args) => {
-    await requireAuthenticatedUser(ctx);
+    await requireExampleAdmin(ctx);
     const emailId = await usesend.sendEmail(ctx, {
       from: "Notifications <notifications@yourdomain.com>",
       to: args.to,
@@ -129,7 +136,7 @@ export const getEmailStatus = query({
     v.null(),
   ),
   handler: async (ctx, args) => {
-    await requireAuthenticatedUser(ctx);
+    await requireExampleAdmin(ctx);
     return await usesend.status(ctx, args.emailId as EmailId);
   },
 });
@@ -139,7 +146,7 @@ export const cancelEmail = mutation({
   args: { emailId: v.string() },
   returns: v.null(),
   handler: async (ctx, args) => {
-    await requireAuthenticatedUser(ctx);
+    await requireExampleAdmin(ctx);
     await usesend.cancelEmail(ctx, args.emailId as EmailId);
   },
 });
@@ -156,7 +163,7 @@ export const listDomains = action({
     }),
   ),
   handler: async (ctx) => {
-    await requireAuthenticatedUser(ctx);
+    await requireExampleAdmin(ctx);
     const domains = await usesend.api.domains.list();
     return domains.map((d) => ({ id: d.id, name: d.name, status: d.status }));
   },
@@ -170,7 +177,7 @@ export const subscribeContact = action({
   },
   returns: v.string(),
   handler: async (ctx, args) => {
-    await requireAuthenticatedUser(ctx);
+    await requireExampleAdmin(ctx);
     const { contactId } = await usesend.api.contacts.create(
       args.contactBookId,
       {

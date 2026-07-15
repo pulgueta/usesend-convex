@@ -134,6 +134,8 @@ describe("UseSend client", () => {
         {
           from: "sender@example.com",
           to: "recipient@example.com",
+          cc: "cc@example.com",
+          bcc: ["bcc@example.com"],
           subject: "Hello",
         },
         sendCallback,
@@ -141,6 +143,27 @@ describe("UseSend client", () => {
     ).resolves.toBe("email_1");
 
     expect(sendCallback).toHaveBeenCalledWith("email_1");
+    expect(runMutation).toHaveBeenNthCalledWith(
+      1,
+      functions.createManualEmail,
+      {
+        options: {
+          apiKey: "test-api-key",
+          baseUrl: "https://app.usesend.com",
+          initialBackoffMs: 30000,
+          retryAttempts: 5,
+          requestTimeoutMs: 30000,
+          onEmailEvent: undefined,
+        },
+        from: "sender@example.com",
+        to: "recipient@example.com",
+        cc: ["cc@example.com"],
+        bcc: ["bcc@example.com"],
+        subject: "Hello",
+        replyTo: undefined,
+        headers: undefined,
+      },
+    );
     expect(runMutation).toHaveBeenLastCalledWith(functions.updateManualEmail, {
       emailId: "email_1",
       status: "sent",

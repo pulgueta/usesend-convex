@@ -371,6 +371,8 @@ export class UseSend {
         options: await configToRuntimeConfig(this.config, this.onEmailEvent),
         from: options.from,
         to: options.to,
+        cc: toArray(options.cc),
+        bcc: toArray(options.bcc),
         subject: options.subject,
         replyTo: options.replyTo,
         headers: options.headers,

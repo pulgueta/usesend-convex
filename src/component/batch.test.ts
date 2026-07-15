@@ -1,5 +1,26 @@
 import { describe, expect, test } from "vitest";
-import { parseBatchResponse } from "./batch.js";
+import { parseBatchResponse, runtimeConfigKey } from "./batch.js";
+import type { RuntimeConfig } from "./shared.js";
+
+const options: RuntimeConfig = {
+  apiKey: "secret-api-key",
+  baseUrl: "https://app.usesend.com",
+  initialBackoffMs: 30_000,
+  retryAttempts: 5,
+  requestTimeoutMs: 30_000,
+};
+
+describe("runtimeConfigKey", () => {
+  test("uses a stable digest instead of the raw API key", async () => {
+    const key = await runtimeConfigKey(options);
+
+    expect(key).not.toContain(options.apiKey);
+    await expect(runtimeConfigKey(options)).resolves.toBe(key);
+    await expect(
+      runtimeConfigKey({ ...options, apiKey: "different-api-key" }),
+    ).resolves.not.toBe(key);
+  });
+});
 
 describe("parseBatchResponse", () => {
   test("accepts required IDs with additional provider metadata", () => {

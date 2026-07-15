@@ -378,9 +378,8 @@ export class UseSendApi {
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this.requestTimeoutMs);
-    let response: Response;
     try {
-      response = await fetch(url, {
+      const response = await fetch(url, {
         method,
         headers,
         body:
@@ -389,19 +388,19 @@ export class UseSendApi {
             : undefined,
         signal: controller.signal,
       });
+
+      if (!response.ok) {
+        throw new UseSendApiError(
+          response.status,
+          await response.text(),
+          method,
+          path,
+        );
+      }
+      return (await response.json()) as T;
     } finally {
       clearTimeout(timeout);
     }
-
-    if (!response.ok) {
-      throw new UseSendApiError(
-        response.status,
-        await response.text(),
-        method,
-        path,
-      );
-    }
-    return (await response.json()) as T;
   }
 
   readonly emails = {

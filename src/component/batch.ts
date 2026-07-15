@@ -1,8 +1,14 @@
 import type { RuntimeConfig } from "./shared.js";
 
-export function runtimeConfigKey(options: RuntimeConfig) {
+export async function runtimeConfigKey(options: RuntimeConfig) {
+  const apiKeyDigest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(options.apiKey),
+  );
   return JSON.stringify([
-    options.apiKey,
+    Array.from(new Uint8Array(apiKeyDigest), (byte) =>
+      byte.toString(16).padStart(2, "0"),
+    ).join(""),
     options.baseUrl,
     options.initialBackoffMs,
     options.retryAttempts,

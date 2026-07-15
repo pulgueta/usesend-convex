@@ -161,6 +161,23 @@ describe("component lib", () => {
     expect(second?.options).toEqual(secondOptions);
   });
 
+  test("stores all recipients for manually sent emails", async () => {
+    const t = initConvexTest();
+    const emailId = await t.mutation(api.lib.createManualEmail, {
+      options,
+      from: "sender@example.com",
+      to: "recipient@example.com",
+      cc: ["cc@example.com"],
+      bcc: ["bcc@example.com"],
+      subject: "Hello",
+    });
+
+    expect(await t.query(api.lib.get, { emailId })).toMatchObject({
+      cc: ["cc@example.com"],
+      bcc: ["bcc@example.com"],
+    });
+  });
+
   test("replaces a stale batch-run sentinel", async () => {
     const t = initConvexTest();
     await t.mutation(api.lib.sendEmail, {

@@ -9,6 +9,7 @@ describe("example", () => {
 
   afterEach(async () => {
     vi.useRealTimers();
+    vi.unstubAllEnvs();
   });
 
   test("usesend component is initialized", async () => {
@@ -26,27 +27,36 @@ describe("example", () => {
     const t = initConvexTest();
 
     await expect(t.mutation(api.example.sendTestEmail)).rejects.toThrow(
-      "Authentication required",
+      "Administrator access required",
     );
     await expect(
       t.query(api.example.getEmailStatus, { emailId: "email_123" }),
-    ).rejects.toThrow("Authentication required");
+    ).rejects.toThrow("Administrator access required");
     await expect(
       t.mutation(api.example.cancelEmail, { emailId: "email_123" }),
-    ).rejects.toThrow("Authentication required");
+    ).rejects.toThrow("Administrator access required");
   });
 
   test("rejects unauthenticated REST API operations", async () => {
     const t = initConvexTest();
 
     await expect(t.action(api.example.listDomains)).rejects.toThrow(
-      "Authentication required",
+      "Administrator access required",
     );
     await expect(
       t.action(api.example.subscribeContact, {
         contactBookId: "book_123",
         email: "recipient@example.com",
       }),
-    ).rejects.toThrow("Authentication required");
+    ).rejects.toThrow("Administrator access required");
+  });
+
+  test("rejects authenticated non-admin users", async () => {
+    vi.stubEnv("USESEND_EXAMPLE_ADMIN_TOKEN_IDENTIFIER", "admin-token");
+    const t = initConvexTest().withIdentity({ tokenIdentifier: "user-token" });
+
+    await expect(t.action(api.example.listDomains)).rejects.toThrow(
+      "Administrator access required",
+    );
   });
 });

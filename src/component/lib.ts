@@ -189,6 +189,8 @@ export const createManualEmail = mutation({
     options: vOptions,
     from: v.string(),
     to: v.union(v.array(v.string()), v.string()),
+    cc: v.optional(v.array(v.string())),
+    bcc: v.optional(v.array(v.string())),
     subject: v.string(),
     replyTo: v.optional(v.array(v.string())),
     headers: v.optional(v.record(v.string(), v.string())),
@@ -200,6 +202,8 @@ export const createManualEmail = mutation({
       options: args.options,
       from: args.from,
       to: Array.isArray(args.to) ? args.to : [args.to],
+      cc: args.cc,
+      bcc: args.bcc,
       subject: args.subject,
       headers: args.headers,
       segment: Infinity,
@@ -417,10 +421,6 @@ async function enqueueBatch(
   emails: Doc<"emails">[],
   options: RuntimeConfig,
 ) {
-  for (const email of emails) {
-    await ctx.db.patch(email._id, { status: "queued" });
-  }
-
   const delay = await getDelay(ctx);
   await emailPool.enqueueAction(
     ctx,
@@ -442,6 +442,10 @@ async function enqueueBatch(
       onComplete: internal.lib.onEmailComplete,
     },
   );
+
+  for (const email of emails) {
+    await ctx.db.patch(email._id, { status: "queued" });
+  }
 }
 
 // Process email batches
@@ -467,7 +471,7 @@ export const makeBatch = internalMutation({
       { options: RuntimeConfig; emails: Doc<"emails">[] }
     >();
     for (const email of emails) {
-      const key = runtimeConfigKey(email.options);
+      const key = await runtimeConfigKey(email.options);
       const batch = batches.get(key);
       if (batch) {
         batch.emails.push(email);
@@ -476,8 +480,13 @@ export const makeBatch = internalMutation({
       }
     }
 
-    for (const batch of batches.values()) {
-      await enqueueBatch(ctx, batch.emails, batch.options);
+    try {
+      for (const batch of batches.values()) {
+        await enqueueBatch(ctx, batch.emails, batch.options);
+      }
+    } catch {
+      await reschedule(ctx, true);
+      return null;
     }
 
     await replaceBatchRun(ctx, 0, {
