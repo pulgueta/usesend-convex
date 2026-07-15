@@ -1,20 +1,17 @@
 import { httpRouter } from "convex/server";
-import { registerRoutes } from "@pulgueta/usesend-convex";
-import { components } from "./_generated/api";
+import { httpAction } from "./_generated/server.js";
+import { usesend } from "./example.js";
 
 const http = httpRouter();
 
-// Initialize the component
-
-// Register HTTP routes for the component
-// This will expose a GET endpoint at /comments/last that returns the most recent comment
-registerRoutes(http, components.usesend, {
-  pathPrefix: "/comments",
+// Handle useSend webhook events
+// Set this URL in your useSend dashboard: https://your-convex-project.convex.site/usesend/webhook
+http.route({
+	path: "/usesend/webhook",
+	method: "POST",
+	handler: httpAction(async (ctx, req) => {
+		return await usesend.handleUseSendEventWebhook(ctx, req);
+	}),
 });
-
-// You can also register routes at different paths
-// usesend.registerRoutes(http, {
-//   path: "/api/comments/latest",
-// });
 
 export default http;

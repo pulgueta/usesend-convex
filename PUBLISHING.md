@@ -12,39 +12,36 @@ If this is your first time, here are the recommended steps:
    should either be like `my-package` or `@my-org/my-package`. If it's the
    latter, ensure you have an npmjs account with permissions to push to
    `my-org`.
-2. `npm login` to login to npmjs.
-3. `npm run clean` to clean your `/dist` directory.
-4. `npm ci` to install the dependencies with the versions specified in
-   `package-lock.json`.
-5. `npm run build` to build the package fresh.
-6. (Optional) `npm run typecheck` to typecheck the package.
-7. (Optional) `npm run lint` to lint the package.
-8. (Optional) `npm run test` to test the package.
-9. (Optional) `npm pack` will create a .tgz file of the package. You can then
+2. `npm login` to log in to npmjs, or configure a granular access token with
+   permission to publish the package.
+3. `pnpm install --frozen-lockfile` to install the dependencies from
+   `pnpm-lock.yaml`.
+4. `npm pack --dry-run` to run the clean build, tests, lint, typecheck, and
+   inspect the package contents without creating a tarball.
+5. (Optional) `npm pack` will create a `.tgz` file of the package. You can then
    try installing it in another project with
    `npm install ./path/to/your-package.tgz` to sanity check that it works as
-   expected. You can remove the .tgz file after.
-10. `npm publish --access public` to publish the package to npm.
-11. `git tag v0.1.0` to tag the new version.
-12. `git push --follow-tags` to push the tags to the repository. This way, other
-    contributors can always see what code was published with each version.
-    Running `npm version ...` will create these tags and commits automatically.
+   expected. You can remove the `.tgz` file afterward.
+6. `npm publish --access public` to publish the package to npm. The explicit
+   access flag is required for the first public publish of a scoped package.
+7. Enter an npm one-time password if the account requires 2FA for writes.
+8. `git tag v0.1.0` to tag the new version.
+9. `git push --follow-tags` to push the tags to the repository. This way, other
+   contributors can always see what code was published with each version.
+   Running `npm version ...` will create these tags and commits automatically.
 
 After the initial publish, you can use the release scripts documented below,
-which will do steps 3-12 automatically (except the sanity check in step 9).
+which will validate, version, publish, and push the tag automatically.
 
 ## Package scripts for releasing
 
 In package.json, there are some scripts that are useful for doing releases.
 
-- `preversion` will run the tests and typecheck the code before marking a new
-  version.
-- `version` will open the changelog in vim and then save it before committing
-  the new version.
-- `prepublishOnly` will make a clean build of the package before publishing.
+- `preversion` makes a clean build and runs tests, lint, and typecheck before
+  marking a new version.
+- `prepack` performs the same validation before either packing or publishing.
 
-These are not required and can be modified or removed if desired. They will all
-be run automatically when using one of the deployment commands.
+These lifecycle scripts run automatically when using the deployment commands.
 
 ## Deploying a new alpha version
 
@@ -68,15 +65,14 @@ major version, you can run the commands manually:
 
 ```sh
 npm version minor # or major
-npm publish
+npm publish --access public
 git push --follow-tags
 ```
 
 ## Building a one-off package
 
 ```sh
-npm run clean
-npm run build
+npm pack --dry-run
 npm pack
 ```
 

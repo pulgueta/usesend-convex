@@ -1,36 +1,261 @@
-import { describe, expect, test } from "vitest";
-import { exposeApi } from "./index.js";
-import { anyApi, type ApiFromModules } from "convex/server";
-import { components, initConvexTest } from "./setup.test.js";
+import { describe, expect, test, vi } from "vitest";
+import { type EmailEvent, type UseSendComponent, UseSend } from "./index.js";
 
-export const { add, list } = exposeApi(components.usesend, {
-  auth: async (ctx, _operation) => {
-    return (await ctx.auth.getUserIdentity())?.subject ?? "anonymous";
-  },
-  baseUrl: "https://pirate.monkeyness.com",
-});
+const functions = {
+  sendEmail: Symbol("sendEmail"),
+  cancelEmail: Symbol("cancelEmail"),
+  getStatus: Symbol("getStatus"),
+  get: Symbol("get"),
+  createManualEmail: Symbol("createManualEmail"),
+  updateManualEmail: Symbol("updateManualEmail"),
+  handleEmailEvent: Symbol("handleEmailEvent"),
+};
 
-const testApi = (
-  anyApi as unknown as ApiFromModules<{
-    "index.test": {
-      add: typeof add;
-      list: typeof list;
+const component = { lib: functions } as unknown as UseSendComponent;
+
+function createClient() {
+  return new UseSend(component, {
+    apiKey: "test-api-key",
+    webhookSecret: "test-webhook-secret",
+  });
+}
+
+function mutationCtx(runMutation: ReturnType<typeof vi.fn>) {
+  return { runMutation } as unknown as Parameters<UseSend["sendEmail"]>[0];
+}
+
+function queryCtx(runQuery: ReturnType<typeof vi.fn>) {
+  return { runQuery } as unknown as Parameters<UseSend["status"]>[0];
+}
+
+async function hmac(secret: string, message: string) {
+  const encoder = new TextEncoder();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    encoder.encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  const signature = await crypto.subtle.sign(
+    "HMAC",
+    key,
+    encoder.encode(message),
+  );
+  return Array.from(new Uint8Array(signature))
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+describe("UseSend client", () => {
+  test("uses the documented defaults", () => {
+    const usesend = new UseSend(component, { apiKey: "test-api-key" });
+
+    expect(usesend.config).toMatchObject({
+      initialBackoffMs: 30000,
+      retryAttempts: 5,
+      requestTimeoutMs: 30000,
+      baseUrl: "https://app.usesend.com",
+    });
+  });
+
+  test("accepts custom options", () => {
+    const usesend = new UseSend(component, {
+      apiKey: "test-api-key",
+      baseUrl: "https://custom.usesend.com",
+      initialBackoffMs: 60000,
+      retryAttempts: 10,
+      requestTimeoutMs: 10000,
+      webhookSecret: "test-webhook-secret",
+    });
+
+    expect(usesend.config).toMatchObject({
+      apiKey: "test-api-key",
+      baseUrl: "https://custom.usesend.com",
+      initialBackoffMs: 60000,
+      retryAttempts: 10,
+      requestTimeoutMs: 10000,
+      webhookSecret: "test-webhook-secret",
+    });
+  });
+
+  test("delegates durable email methods to the component", async () => {
+    const usesend = createClient();
+    const runMutation = vi.fn().mockResolvedValue("email_1");
+    const runQuery = vi.fn().mockResolvedValue({ status: "waiting" });
+
+    const emailId = await usesend.sendEmail(mutationCtx(runMutation), {
+      from: "sender@example.com",
+      to: "recipient@example.com",
+      subject: "Hello",
+      text: "Hello",
+    });
+    expect(emailId).toBe("email_1");
+    expect(runMutation).toHaveBeenCalledWith(functions.sendEmail, {
+      options: {
+        apiKey: "test-api-key",
+        baseUrl: "https://app.usesend.com",
+        initialBackoffMs: 30000,
+        retryAttempts: 5,
+        requestTimeoutMs: 30000,
+        onEmailEvent: undefined,
+      },
+      from: "sender@example.com",
+      to: ["recipient@example.com"],
+      subject: "Hello",
+      text: "Hello",
+      cc: undefined,
+      bcc: undefined,
+    });
+
+    await usesend.cancelEmail(mutationCtx(runMutation), emailId);
+    expect(runMutation).toHaveBeenLastCalledWith(functions.cancelEmail, {
+      emailId,
+    });
+
+    await usesend.status(queryCtx(runQuery), emailId);
+    expect(runQuery).toHaveBeenLastCalledWith(functions.getStatus, { emailId });
+
+    await usesend.get(queryCtx(runQuery), emailId);
+    expect(runQuery).toHaveBeenLastCalledWith(functions.get, { emailId });
+  });
+
+  test("tracks a successful manual send with its provider ID", async () => {
+    const usesend = createClient();
+    const runMutation = vi
+      .fn()
+      .mockResolvedValueOnce("email_1")
+      .mockResolvedValueOnce(null);
+    const sendCallback = vi.fn().mockResolvedValue("usesend_1");
+
+    await expect(
+      usesend.sendEmailManually(
+        mutationCtx(runMutation),
+        {
+          from: "sender@example.com",
+          to: "recipient@example.com",
+          cc: "cc@example.com",
+          bcc: ["bcc@example.com"],
+          subject: "Hello",
+        },
+        sendCallback,
+      ),
+    ).resolves.toBe("email_1");
+
+    expect(sendCallback).toHaveBeenCalledWith("email_1");
+    expect(runMutation).toHaveBeenNthCalledWith(
+      1,
+      functions.createManualEmail,
+      {
+        options: {
+          apiKey: "test-api-key",
+          baseUrl: "https://app.usesend.com",
+          initialBackoffMs: 30000,
+          retryAttempts: 5,
+          requestTimeoutMs: 30000,
+          onEmailEvent: undefined,
+        },
+        from: "sender@example.com",
+        to: "recipient@example.com",
+        cc: ["cc@example.com"],
+        bcc: ["bcc@example.com"],
+        subject: "Hello",
+        replyTo: undefined,
+        headers: undefined,
+      },
+    );
+    expect(runMutation).toHaveBeenLastCalledWith(functions.updateManualEmail, {
+      emailId: "email_1",
+      status: "sent",
+      usesendId: "usesend_1",
+    });
+  });
+
+  test("does not relabel a sent email when bookkeeping fails", async () => {
+    const usesend = createClient();
+    const bookkeepingError = new Error("bookkeeping failed");
+    const runMutation = vi
+      .fn()
+      .mockResolvedValueOnce("email_1")
+      .mockRejectedValueOnce(bookkeepingError);
+
+    await expect(
+      usesend.sendEmailManually(
+        mutationCtx(runMutation),
+        {
+          from: "sender@example.com",
+          to: "recipient@example.com",
+          subject: "Hello",
+        },
+        vi.fn().mockResolvedValue("usesend_1"),
+      ),
+    ).rejects.toBe(bookkeepingError);
+
+    expect(runMutation).toHaveBeenCalledTimes(2);
+    expect(runMutation).toHaveBeenLastCalledWith(functions.updateManualEmail, {
+      emailId: "email_1",
+      status: "sent",
+      usesendId: "usesend_1",
+    });
+  });
+
+  test("accepts a correctly signed webhook with a millisecond timestamp", async () => {
+    const usesend = createClient();
+    const event: EmailEvent = {
+      id: "call_1",
+      type: "email.delivered",
+      version: "2026-01-18",
+      createdAt: "2026-07-14T20:00:00.000Z",
+      teamId: 1,
+      data: {
+        id: "usesend_1",
+        status: "DELIVERED",
+        from: "sender@example.com",
+        to: ["recipient@example.com"],
+        occurredAt: "2026-07-14T20:00:00.000Z",
+      },
+      attempt: 1,
     };
-  }>
-)["index.test"];
+    const raw = JSON.stringify(event);
+    const timestamp = String(Date.now());
+    const signature = await hmac("test-webhook-secret", `${timestamp}.${raw}`);
+    const request = new Request("https://example.com/webhook", {
+      method: "POST",
+      headers: {
+        "X-UseSend-Signature": `v1=${signature}`,
+        "X-UseSend-Timestamp": timestamp,
+      },
+      body: raw,
+    });
+    const runMutation = vi.fn().mockResolvedValue(null);
 
-describe("client tests", () => {
-  test("should be able to use client", async () => {
-    const t = initConvexTest().withIdentity({
-      subject: "user1",
+    const response = await usesend.handleUseSendEventWebhook(
+      { runMutation } as unknown as Parameters<
+        UseSend["handleUseSendEventWebhook"]
+      >[0],
+      request,
+    );
+
+    expect(response.status).toBe(200);
+    expect(runMutation).toHaveBeenCalledWith(functions.handleEmailEvent, {
+      event,
     });
-    const targetId = "test-subject-1";
-    await t.mutation(testApi.add, {
-      text: "My first comment",
-      targetId: targetId,
+  });
+
+  test("rejects webhook handling when the secret is missing", async () => {
+    const usesend = new UseSend(component, { webhookSecret: "" });
+    const request = new Request("https://example.com/webhook", {
+      method: "POST",
+      body: "{}",
     });
-    const comments = await t.query(testApi.list, { targetId });
-    expect(comments).toHaveLength(1);
-    expect(comments[0].text).toBe("My first comment");
+
+    await expect(
+      usesend.handleUseSendEventWebhook(
+        { runMutation: vi.fn() } as unknown as Parameters<
+          UseSend["handleUseSendEventWebhook"]
+        >[0],
+        request,
+      ),
+    ).rejects.toThrow("Webhook secret is not set");
   });
 });
