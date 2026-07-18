@@ -2,7 +2,6 @@ import { literals } from "convex-helpers/validators";
 import {
   type GenericActionCtx,
   type GenericDataModel,
-  type GenericQueryCtx,
 } from "convex/server";
 import { type Infer, v } from "convex/values";
 
@@ -241,8 +240,11 @@ export type EventEventOfType<T extends EventEventTypes> = Extract<
 
 /* Type utils follow */
 
+// Use the action context's method signatures: they are the narrowest of the
+// three contexts (no `transactionLimits` options parameter), so query,
+// mutation, and action contexts are all assignable to these types.
 export type RunQueryCtx = {
-  runQuery: GenericQueryCtx<GenericDataModel>["runQuery"];
+  runQuery: GenericActionCtx<GenericDataModel>["runQuery"];
 };
 export type RunMutationCtx = {
   runMutation: GenericActionCtx<GenericDataModel>["runMutation"];
