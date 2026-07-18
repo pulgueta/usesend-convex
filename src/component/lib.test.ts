@@ -3,15 +3,16 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api.js";
 import type { EmailEvent, RuntimeConfig } from "./shared.js";
-import { initConvexTest } from "./setup.test.js";
+import { initConvexTest } from "./test.setup.js";
 
 const options: RuntimeConfig = {
-  apiKey: "test-api-key",
   baseUrl: "https://app.usesend.com",
   initialBackoffMs: 30000,
   retryAttempts: 5,
   requestTimeoutMs: 30000,
 };
+
+const TEST_ENV_API_KEY = "env-secret-api-key";
 
 function event(
   type: "email.delivered" | "email.cancelled",
@@ -60,10 +61,12 @@ async function createManualEmail(
 describe("component lib", () => {
   beforeEach(async () => {
     vi.useFakeTimers();
+    vi.stubEnv("USESEND_API_KEY", TEST_ENV_API_KEY);
   });
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   test("sendEmail creates an email record", async () => {
@@ -83,6 +86,33 @@ describe("component lib", () => {
     const status = await t.query(api.lib.getStatus, { emailId });
     expect(status).toBeDefined();
     expect(status?.status).toBe("waiting");
+  });
+
+  test("batches a scheduled email through the workpool end to end", async () => {
+    const t = initConvexTest();
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ data: [{ emailId: "usesend_1" }] })),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const emailId = await t.mutation(api.lib.sendEmail, {
+      from: "test@example.com",
+      to: ["recipient@example.com"],
+      subject: "Test Subject",
+      text: "Test content",
+      options,
+    });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+    expect(await t.query(api.lib.getStatus, { emailId })).toMatchObject({
+      status: "sent",
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(
+      await t.run((ctx) => ctx.db.query("nextBatchRun").collect()),
+    ).toHaveLength(0);
   });
 
   test("cancelEmail cancels a waiting email", async () => {
@@ -146,7 +176,7 @@ describe("component lib", () => {
   test("stores runtime options with each email", async () => {
     const t = initConvexTest();
     const firstId = await createManualEmail(t);
-    const secondOptions = { ...options, apiKey: "other-api-key" };
+    const secondOptions = { ...options, retryAttempts: 7 };
     const secondId = await t.mutation(api.lib.createManualEmail, {
       options: secondOptions,
       from: "sender@example.com",
@@ -223,7 +253,6 @@ describe("component lib", () => {
     );
 
     await t.action(internal.lib.callUseSendAPIWithBatch, {
-      apiKey: options.apiKey,
       baseUrl: options.baseUrl,
       requestTimeoutMs: options.requestTimeoutMs,
       emails: [emailId],
@@ -231,6 +260,89 @@ describe("component lib", () => {
 
     const email = await t.query(api.lib.get, { emailId });
     expect(email).toMatchObject({ status: "sent", usesendId: "usesend_1" });
+  });
+
+  test("serializes template variables as strings for the batch API", async () => {
+    const t = initConvexTest();
+    const emailId = await t.mutation(api.lib.sendEmail, {
+      options,
+      from: "sender@example.com",
+      to: ["recipient@example.com"],
+      template: { id: "template_1", variables: { name: "Ada", count: 3 } },
+    });
+    await t.run((ctx) => ctx.db.patch(emailId, { status: "queued" }));
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ emailId: "usesend_1", status: "queued" }],
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await t.action(internal.lib.callUseSendAPIWithBatch, {
+      baseUrl: options.baseUrl,
+      requestTimeoutMs: options.requestTimeoutMs,
+      emails: [emailId],
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [payload] = JSON.parse(init.body as string);
+    // The useSend batch schema only permits string variable values.
+    expect(payload.templateId).toBe("template_1");
+    expect(payload.variables).toEqual({ name: "Ada", count: "3" });
+  });
+
+  test("prefers the USESEND_BASE_URL component binding over stored options", async () => {
+    vi.stubEnv("USESEND_BASE_URL", "https://selfhosted.example.com");
+    const t = initConvexTest();
+    const emailId = await createManualEmail(t);
+    await t.run((ctx) => ctx.db.patch(emailId, { status: "queued" }));
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ emailId: "usesend_1", status: "queued" }],
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await t.action(internal.lib.callUseSendAPIWithBatch, {
+      baseUrl: options.baseUrl,
+      requestTimeoutMs: options.requestTimeoutMs,
+      emails: [emailId],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://selfhosted.example.com/api/v1/emails/batch",
+      expect.anything(),
+    );
+  });
+
+  test("falls back to the client baseUrl when USESEND_BASE_URL is unbound", async () => {
+    vi.stubEnv("USESEND_BASE_URL", "");
+    const t = initConvexTest();
+    const emailId = await createManualEmail(t);
+    await t.run((ctx) => ctx.db.patch(emailId, { status: "queued" }));
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ emailId: "usesend_1", status: "queued" }],
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await t.action(internal.lib.callUseSendAPIWithBatch, {
+      baseUrl: options.baseUrl,
+      requestTimeoutMs: options.requestTimeoutMs,
+      emails: [emailId],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${options.baseUrl}/api/v1/emails/batch`,
+      expect.anything(),
+    );
   });
 
   test("rejects incomplete batch responses without marking emails sent", async () => {
@@ -252,7 +364,6 @@ describe("component lib", () => {
 
     await expect(
       t.action(internal.lib.callUseSendAPIWithBatch, {
-        apiKey: options.apiKey,
         baseUrl: options.baseUrl,
         requestTimeoutMs: options.requestTimeoutMs,
         emails: [firstId, secondId],
@@ -261,6 +372,35 @@ describe("component lib", () => {
     expect(
       (await t.query(api.lib.getStatus, { emailId: firstId }))?.status,
     ).toBe("queued");
+  });
+
+  test("fails only outbound emails on a permanent provider error", async () => {
+    const t = initConvexTest();
+    const outboundId = await createManualEmail(t);
+    const cancelledId = await createManualEmail(t);
+    await t.run((ctx) =>
+      ctx.db.patch(cancelledId, {
+        status: "cancelled",
+        finalizedAt: Date.now(),
+      }),
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response("invalid", { status: 422 })),
+    );
+
+    await t.action(internal.lib.callUseSendAPIWithBatch, {
+      baseUrl: options.baseUrl,
+      requestTimeoutMs: options.requestTimeoutMs,
+      emails: [cancelledId, outboundId],
+    });
+
+    expect(
+      await t.query(api.lib.getStatus, { emailId: outboundId }),
+    ).toMatchObject({ status: "failed", failed: true });
+    expect(
+      await t.query(api.lib.getStatus, { emailId: cancelledId }),
+    ).toMatchObject({ status: "cancelled", failed: false });
   });
 
   test("aborts a batch request after the configured timeout", async () => {
@@ -284,7 +424,6 @@ describe("component lib", () => {
     );
 
     const request = t.action(internal.lib.callUseSendAPIWithBatch, {
-      apiKey: options.apiKey,
       baseUrl: options.baseUrl,
       requestTimeoutMs: 50,
       emails: [emailId],
@@ -330,6 +469,104 @@ describe("component lib", () => {
       ctx.db.query("deliveryEvents").collect(),
     );
     expect(deliveryEvents).toHaveLength(1);
+  });
+
+  test("handles every email event documented by useSend", async () => {
+    const t = initConvexTest();
+    const cases = [
+      { type: "email.queued", expected: { status: "sent" } },
+      { type: "email.sent", expected: { status: "sent" } },
+      { type: "email.delivered", expected: { status: "delivered" } },
+      {
+        type: "email.delivery_delayed",
+        expected: { status: "delivery_delayed", deliveryDelayed: true },
+      },
+      {
+        type: "email.complained",
+        expected: { status: "sent", complained: true },
+      },
+      {
+        type: "email.bounced",
+        data: {
+          bounce: { type: "Permanent", subType: "General", message: "bad" },
+        },
+        expected: { status: "bounced", bounced: true, errorMessage: "bad" },
+      },
+      {
+        type: "email.opened",
+        data: { open: { timestamp: "2026-07-14T20:01:00.000Z" } },
+        expected: { status: "sent", opened: true },
+      },
+      {
+        type: "email.clicked",
+        data: {
+          click: {
+            timestamp: "2026-07-14T20:01:00.000Z",
+            url: "https://example.com",
+          },
+        },
+        expected: { status: "sent", clicked: true },
+      },
+      {
+        type: "email.failed",
+        data: { failed: { reason: "provider failure" } },
+        expected: {
+          status: "failed",
+          failed: true,
+          errorMessage: "provider failure",
+        },
+      },
+      {
+        type: "email.rendering_failure",
+        expected: { status: "failed", failed: true },
+      },
+      {
+        type: "email.rejected",
+        expected: { status: "failed", failed: true },
+      },
+      { type: "email.cancelled", expected: { status: "cancelled" } },
+      {
+        type: "email.suppressed",
+        data: {
+          suppression: { type: "manual", reason: "blocked recipient" },
+        },
+        expected: {
+          status: "failed",
+          failed: true,
+          errorMessage: "Suppressed: blocked recipient",
+        },
+      },
+    ] as const;
+
+    for (const [index, testCase] of cases.entries()) {
+      const usesendId = `usesend_${index}`;
+      const emailId = await createManualEmail(t, usesendId);
+      await t.mutation(api.lib.handleEmailEvent, {
+        event: {
+          id: `call_${index}`,
+          type: testCase.type,
+          version: "2026-01-18",
+          createdAt: "2026-07-14T20:00:00.000Z",
+          teamId: 1,
+          attempt: 1,
+          data: {
+            id: usesendId,
+            status: testCase.type.slice("email.".length).toUpperCase(),
+            from: "sender@example.com",
+            to: ["recipient@example.com"],
+            occurredAt: "2026-07-14T20:00:00.000Z",
+            ...("data" in testCase ? testCase.data : {}),
+          },
+        },
+      });
+      expect(await t.query(api.lib.getStatus, { emailId })).toMatchObject(
+        testCase.expected,
+      );
+    }
+
+    expect(
+      await t.run((ctx) => ctx.db.query("deliveryEvents").collect()),
+    ).toHaveLength(cases.length);
   });
 
   test("preserves cancelled provider events without marking failure", async () => {
@@ -382,5 +619,58 @@ describe("component lib", () => {
     await t.mutation(api.lib.cleanupAbandonedEmails, { olderThan: 0 });
 
     expect(await t.query(api.lib.get, { emailId })).not.toBeNull();
+  });
+
+  test("cleans finalized emails and their related content and events", async () => {
+    const t = initConvexTest();
+    const emailId = await t.mutation(api.lib.sendEmail, {
+      options,
+      from: "sender@example.com",
+      to: ["recipient@example.com"],
+      subject: "Old",
+      html: "<p>Old</p>",
+      text: "Old",
+    });
+    await t.run(async (ctx) => {
+      await ctx.db.patch(emailId, {
+        status: "delivered",
+        usesendId: "usesend_old",
+        finalizedAt: 0,
+      });
+      for (let index = 0; index < 101; index++) {
+        await ctx.db.insert("deliveryEvents", {
+          eventId: `call_old_${index}`,
+          emailId,
+          usesendId: "usesend_old",
+          eventType: "email.delivered",
+          createdAt: "2026-07-14T20:00:00.000Z",
+        });
+      }
+    });
+
+    await t.mutation(api.lib.cleanupOldEmails, { olderThan: 0 });
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+    expect(await t.query(api.lib.get, { emailId })).toBeNull();
+    await t.run(async (ctx) => {
+      expect(await ctx.db.query("content").collect()).toHaveLength(0);
+      expect(await ctx.db.query("deliveryEvents").collect()).toHaveLength(0);
+    });
+  });
+
+  test("cleans abandoned waiting emails after the retention cutoff", async () => {
+    const t = initConvexTest();
+    const emailId = await t.mutation(api.lib.sendEmail, {
+      options,
+      from: "sender@example.com",
+      to: ["recipient@example.com"],
+      subject: "Abandoned",
+      text: "Abandoned",
+    });
+    await t.run((ctx) => ctx.db.patch(emailId, { retentionAnchor: 0 }));
+
+    await t.mutation(api.lib.cleanupAbandonedEmails, { olderThan: 0 });
+
+    expect(await t.query(api.lib.get, { emailId })).toBeNull();
   });
 });

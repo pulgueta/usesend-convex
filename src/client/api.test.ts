@@ -1,212 +1,357 @@
-import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { UseSendApi, UseSendApiError } from "./api.js";
+import { afterEach, expect, test, vi } from "vitest";
+import { UseSendApi } from "./api.js";
+import { initConvexTest } from "../../example/convex/test.setup.js";
 
-function mockFetch(status = 200, body: unknown = {}) {
+function mockJson(body: unknown = {}) {
   const fetchMock = vi
     .fn()
-    .mockResolvedValue(new Response(JSON.stringify(body), { status }));
+    .mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
   return fetchMock;
 }
 
-function requestOf(fetchMock: ReturnType<typeof vi.fn>) {
+function firstRequest(fetchMock: ReturnType<typeof vi.fn>) {
   const [url, init] = fetchMock.mock.calls[0] as [URL, RequestInit];
   return { url, init };
 }
 
-describe("UseSendApi", () => {
-  beforeEach(() => {
-    mockFetch();
-  });
-  afterEach(() => {
-    vi.useRealTimers();
-    vi.unstubAllGlobals();
-  });
+afterEach(() => {
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
 
+test("the action client covers every operation in the useSend OpenAPI spec", async () => {
+  const t = initConvexTest();
   const api = new UseSendApi({
     apiKey: "test-api-key",
     baseUrl: "https://usesend.example.com",
   });
-
-  test("throws when API key is empty", () => {
-    expect(() => new UseSendApi({ apiKey: "" })).toThrow("API key is not set");
-  });
-
-  test("throws when request timeout is invalid", () => {
-    expect(
-      () => new UseSendApi({ apiKey: "key", requestTimeoutMs: 0 }),
-    ).toThrow("Request timeout must be a positive finite number");
-  });
-
-  test("aborts requests that exceed the configured timeout", async () => {
-    vi.useFakeTimers();
-    const fetchMock = vi.fn(
-      (_url: URL, init: RequestInit) =>
-        new Promise<Response>((_resolve, reject) => {
-          init.signal?.addEventListener("abort", () => {
-            reject(new DOMException("The operation was aborted", "AbortError"));
-          });
+  const cases: Array<{
+    method: string;
+    path: string;
+    call: () => Promise<unknown>;
+  }> = [
+    { method: "GET", path: "/domains", call: () => api.domains.list() },
+    {
+      method: "POST",
+      path: "/domains",
+      call: () => api.domains.create("example.com", "us-east-1"),
+    },
+    { method: "GET", path: "/domains/1", call: () => api.domains.get(1) },
+    {
+      method: "PUT",
+      path: "/domains/1/verify",
+      call: () => api.domains.verify(1),
+    },
+    {
+      method: "DELETE",
+      path: "/domains/1",
+      call: () => api.domains.delete(1),
+    },
+    {
+      method: "POST",
+      path: "/emails",
+      call: () =>
+        api.emails.send({ from: "from@example.com", to: "to@example.com" }),
+    },
+    {
+      method: "POST",
+      path: "/emails/batch",
+      call: () =>
+        api.emails.batch([{ from: "from@example.com", to: "to@example.com" }]),
+    },
+    {
+      method: "GET",
+      path: "/emails/email%2F1",
+      call: () => api.emails.get("email/1"),
+    },
+    {
+      method: "GET",
+      path: "/emails",
+      call: () => api.emails.list({ page: 2, limit: 10, domainId: "1" }),
+    },
+    {
+      method: "PATCH",
+      path: "/emails/email_1",
+      call: () => api.emails.updateSchedule("email_1", "2026-08-01T09:00:00Z"),
+    },
+    {
+      method: "POST",
+      path: "/emails/email_1/cancel",
+      call: () => api.emails.cancel("email_1"),
+    },
+    {
+      method: "POST",
+      path: "/contactBooks/book_1/contacts",
+      call: () => api.contacts.create("book_1", { email: "to@example.com" }),
+    },
+    {
+      method: "GET",
+      path: "/contactBooks/book_1/contacts/contact_1",
+      call: () => api.contacts.get("book_1", "contact_1"),
+    },
+    {
+      method: "GET",
+      path: "/contactBooks/book_1/contacts",
+      call: () =>
+        api.contacts.list("book_1", {
+          emails: "to@example.com",
+          ids: "contact_1",
+          page: 1,
+          limit: 25,
         }),
+    },
+    {
+      method: "PATCH",
+      path: "/contactBooks/book_1/contacts/contact_1",
+      call: () =>
+        api.contacts.update("book_1", "contact_1", { firstName: "Ada" }),
+    },
+    {
+      method: "PUT",
+      path: "/contactBooks/book_1/contacts/contact_1",
+      call: () =>
+        api.contacts.upsert("book_1", "contact_1", {
+          email: "to@example.com",
+        }),
+    },
+    {
+      method: "DELETE",
+      path: "/contactBooks/book_1/contacts/contact_1",
+      call: () => api.contacts.delete("book_1", "contact_1"),
+    },
+    {
+      method: "POST",
+      path: "/contactBooks/book_1/contacts/bulk",
+      call: () =>
+        api.contacts.bulkCreate("book_1", [{ email: "to@example.com" }]),
+    },
+    {
+      method: "DELETE",
+      path: "/contactBooks/book_1/contacts/bulk",
+      call: () => api.contacts.bulkDelete("book_1", ["contact_1"]),
+    },
+    {
+      method: "GET",
+      path: "/contactBooks",
+      call: () => api.contactBooks.list(),
+    },
+    {
+      method: "POST",
+      path: "/contactBooks",
+      call: () => api.contactBooks.create({ name: "Customers" }),
+    },
+    {
+      method: "GET",
+      path: "/contactBooks/book_1",
+      call: () => api.contactBooks.get("book_1"),
+    },
+    {
+      method: "PATCH",
+      path: "/contactBooks/book_1",
+      call: () => api.contactBooks.update("book_1", { name: "Leads" }),
+    },
+    {
+      method: "DELETE",
+      path: "/contactBooks/book_1",
+      call: () => api.contactBooks.delete("book_1"),
+    },
+    {
+      method: "POST",
+      path: "/campaigns",
+      call: () =>
+        api.campaigns.create({
+          name: "Launch",
+          from: "from@example.com",
+          subject: "Hello",
+          contactBookId: "book_1",
+        }),
+    },
+    {
+      method: "GET",
+      path: "/campaigns",
+      call: () => api.campaigns.list({ page: 1, status: "DRAFT" }),
+    },
+    {
+      method: "GET",
+      path: "/campaigns/campaign_1",
+      call: () => api.campaigns.get("campaign_1"),
+    },
+    {
+      method: "DELETE",
+      path: "/campaigns/campaign_1",
+      call: () => api.campaigns.delete("campaign_1"),
+    },
+    {
+      method: "POST",
+      path: "/campaigns/campaign_1/schedule",
+      call: () => api.campaigns.schedule("campaign_1", { batchSize: 100 }),
+    },
+    {
+      method: "POST",
+      path: "/campaigns/campaign_1/pause",
+      call: () => api.campaigns.pause("campaign_1"),
+    },
+    {
+      method: "POST",
+      path: "/campaigns/campaign_1/resume",
+      call: () => api.campaigns.resume("campaign_1"),
+    },
+    {
+      method: "GET",
+      path: "/analytics/email-time-series",
+      call: () => api.analytics.emailTimeSeries({ days: 30, domainId: 1 }),
+    },
+    {
+      method: "GET",
+      path: "/analytics/reputation-metrics",
+      call: () => api.analytics.reputationMetrics({ domainId: 1 }),
+    },
+  ];
+
+  for (const operation of cases) {
+    const fetchMock = mockJson();
+    await t.action(async () => {
+      await operation.call();
+      return null;
+    });
+    const { url, init } = firstRequest(fetchMock);
+    expect(init.method).toBe(operation.method);
+    expect(url.pathname).toBe(`/api/v1${operation.path}`);
+    vi.unstubAllGlobals();
+  }
+});
+
+test("the action client matches useSend headers, scalar selectors, and bodies", async () => {
+  const t = initConvexTest();
+  const api = new UseSendApi({
+    apiKey: "test-api-key",
+    baseUrl: "https://usesend.example.com",
+  });
+  const fetchMock = mockJson({ emailId: "email_1" });
+
+  await t.action(async () => {
+    await api.emails.send(
+      {
+        from: "from@example.com",
+        to: ["to@example.com"],
+        templateId: "template_1",
+        variables: { name: "Ada" },
+      },
+      { idempotencyKey: "signup-1" },
     );
-    vi.stubGlobal("fetch", fetchMock);
-    const timedApi = new UseSendApi({
-      apiKey: "key",
-      requestTimeoutMs: 50,
-    });
-
-    const request = timedApi.domains.list();
-    const rejection = expect(request).rejects.toMatchObject({
-      name: "AbortError",
-    });
-    await vi.advanceTimersByTimeAsync(50);
-    await rejection;
-
-    const { init } = requestOf(fetchMock);
-    expect(init.signal?.aborted).toBe(true);
-    expect(vi.getTimerCount()).toBe(0);
+    return null;
   });
 
-  test("keeps the timeout active while reading the response body", async () => {
-    vi.useFakeTimers();
-    const fetchMock = vi.fn((_url: URL, init: RequestInit) => {
-      const body = new ReadableStream({
-        start(controller) {
-          init.signal?.addEventListener("abort", () => {
-            controller.error(
-              new DOMException("The operation was aborted", "AbortError"),
-            );
-          });
-        },
-      });
-      return Promise.resolve(new Response(body));
-    });
-    vi.stubGlobal("fetch", fetchMock);
-    const timedApi = new UseSendApi({
-      apiKey: "key",
-      requestTimeoutMs: 50,
-    });
-
-    const request = timedApi.domains.list();
-    const rejection = expect(request).rejects.toMatchObject({
-      name: "AbortError",
-    });
-    await vi.advanceTimersByTimeAsync(50);
-    await rejection;
-
-    const { init } = requestOf(fetchMock);
-    expect(init.signal?.aborted).toBe(true);
-    expect(vi.getTimerCount()).toBe(0);
+  const { init } = firstRequest(fetchMock);
+  expect(init.headers).toMatchObject({
+    Authorization: "Bearer test-api-key",
+    "Content-Type": "application/json",
+    "Idempotency-Key": "signup-1",
+  });
+  expect(JSON.parse(init.body as string)).toMatchObject({
+    templateId: "template_1",
+    variables: { name: "Ada" },
   });
 
-  test("defaults to the hosted useSend base URL", async () => {
-    const fetchMock = mockFetch();
-    await new UseSendApi({ apiKey: "key" }).domains.list();
-    const { url } = requestOf(fetchMock);
-    expect(url.toString()).toBe("https://app.usesend.com/api/v1/domains");
-  });
-
-  test("sends authorization and content-type headers", async () => {
-    const fetchMock = mockFetch(200, { emailId: "email_123" });
-    await api.emails.send({
-      to: "a@b.com",
-      from: "c@d.com",
-      subject: "Hi",
-      text: "Hello",
-    });
-    const { url, init } = requestOf(fetchMock);
-    expect(url.toString()).toBe("https://usesend.example.com/api/v1/emails");
-    expect(init.method).toBe("POST");
-    expect(init.headers).toMatchObject({
-      Authorization: "Bearer test-api-key",
-      "Content-Type": "application/json",
-    });
-    expect(JSON.parse(init.body as string)).toMatchObject({
-      to: "a@b.com",
-      subject: "Hi",
-    });
-  });
-
-  test("passes idempotency key header", async () => {
-    const fetchMock = mockFetch(200, { data: [] });
-    await api.emails.batch([{ to: "a@b.com", from: "c@d.com" }], {
-      idempotencyKey: "order-42",
-    });
-    const { init } = requestOf(fetchMock);
-    expect(init.headers).toMatchObject({ "Idempotency-Key": "order-42" });
-  });
-
-  test("serializes query params and skips undefined ones", async () => {
-    const fetchMock = mockFetch(200, { data: [], count: 0 });
-    await api.emails.list({
+  vi.unstubAllGlobals();
+  const queryFetch = mockJson([]);
+  await t.action(async () => {
+    await api.contacts.list("book_1", {
+      emails: "ada@example.com",
+      ids: "contact_1",
       page: 2,
       limit: 10,
-      domainId: ["1", "2"],
-      startDate: undefined,
     });
-    const { url } = requestOf(fetchMock);
-    expect(url.searchParams.get("page")).toBe("2");
-    expect(url.searchParams.get("limit")).toBe("10");
-    expect(url.searchParams.getAll("domainId")).toEqual(["1", "2"]);
-    expect(url.searchParams.has("startDate")).toBe(false);
+    return null;
   });
+  const { url } = firstRequest(queryFetch);
+  expect(url.searchParams.get("emails")).toBe("ada@example.com");
+  expect(url.searchParams.get("ids")).toBe("contact_1");
+  expect(url.searchParams.get("page")).toBe("2");
+  expect(url.searchParams.get("limit")).toBe("10");
+});
 
-  test("builds nested contact routes", async () => {
-    const fetchMock = mockFetch(200, { contactId: "contact_1" });
-    await api.contacts.upsert("book_1", "contact_1", { email: "a@b.com" });
-    const { url, init } = requestOf(fetchMock);
-    expect(url.pathname).toBe("/api/v1/contactBooks/book_1/contacts/contact_1");
-    expect(init.method).toBe("PUT");
-  });
+test("the action client rejects unsafe paths and reports provider errors", async () => {
+  const t = initConvexTest();
+  const api = new UseSendApi({ apiKey: "test-api-key" });
+  const fetchMock = mockJson();
 
-  test("encodes resource IDs as individual path segments", async () => {
-    const fetchMock = mockFetch();
-    await api.emails.get("../domains");
-    const { url } = requestOf(fetchMock);
-    expect(url.pathname).toBe("/api/v1/emails/..%2Fdomains");
-  });
+  await expect(
+    t.action(async () => {
+      await api.contactBooks.get("..");
+      return null;
+    }),
+  ).rejects.toThrow("API resource ID cannot be a dot segment");
+  expect(fetchMock).not.toHaveBeenCalled();
 
-  test("rejects dot-only resource IDs before making a request", async () => {
-    const fetchMock = mockFetch();
-    await expect(api.contactBooks.get("..")).rejects.toThrow(
-      "API resource ID cannot be a dot segment",
-    );
-    expect(fetchMock).not.toHaveBeenCalled();
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ error: "invalid" }), { status: 422 }),
+      ),
+  );
+  const error = await t.action(async () => {
+    try {
+      await api.campaigns.schedule("campaign_1", {
+        scheduledAt: "tomorrow 9am",
+      });
+      return null;
+    } catch (value) {
+      const candidate = value as { name: string; status: number; body: string };
+      return {
+        name: candidate.name,
+        status: candidate.status,
+        body: candidate.body,
+      };
+    }
   });
+  expect(error).toMatchObject({
+    name: "UseSendApiError",
+    status: 422,
+    body: expect.stringContaining("invalid"),
+  });
+});
 
-  test("sends a body on bulk contact deletes", async () => {
-    const fetchMock = mockFetch(200, { success: true, count: 2 });
-    await api.contacts.bulkDelete("book_1", ["c1", "c2"]);
-    const { url, init } = requestOf(fetchMock);
-    expect(url.pathname).toBe("/api/v1/contactBooks/book_1/contacts/bulk");
-    expect(init.method).toBe("DELETE");
-    expect(JSON.parse(init.body as string)).toEqual({
-      contactIds: ["c1", "c2"],
-    });
-  });
+test("the action client enforces API keys and request timeouts", async () => {
+  const t = initConvexTest();
+  await expect(
+    t.action(async () => {
+      new UseSendApi({ apiKey: "" });
+      return null;
+    }),
+  ).rejects.toThrow("API key is not set");
+  await expect(
+    t.action(async () => {
+      new UseSendApi({ apiKey: "key", requestTimeoutMs: 0 });
+      return null;
+    }),
+  ).rejects.toThrow("Request timeout must be a positive finite number");
 
-  test("returns the parsed response body", async () => {
-    mockFetch(200, {
-      delivered: 100,
-      hardBounced: 1,
-      complained: 0,
-      bounceRate: 0.01,
-      complaintRate: 0,
-    });
-    const metrics = await api.analytics.reputationMetrics({ domainId: 1 });
-    expect(metrics.delivered).toBe(100);
-    expect(metrics.bounceRate).toBe(0.01);
+  vi.useFakeTimers();
+  const fetchMock = vi.fn(
+    (_url: URL, init: RequestInit) =>
+      new Promise<Response>((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () => {
+          reject(new DOMException("The operation was aborted", "AbortError"));
+        });
+      }),
+  );
+  vi.stubGlobal("fetch", fetchMock);
+  const api = new UseSendApi({ apiKey: "key", requestTimeoutMs: 50 });
+  const request = t.action(async () => {
+    await api.domains.list();
+    return null;
   });
-
-  test("throws UseSendApiError with status and body on failure", async () => {
-    mockFetch(422, { error: "invalid" });
-    const error = await api.campaigns
-      .schedule("camp_1", { scheduledAt: "tomorrow 9am" })
-      .then(
-        () => null,
-        (e: unknown) => e,
-      );
-    expect(error).toBeInstanceOf(UseSendApiError);
-    expect((error as UseSendApiError).status).toBe(422);
-    expect((error as UseSendApiError).body).toContain("invalid");
+  const rejection = expect(request).rejects.toMatchObject({
+    name: "AbortError",
   });
+  await vi.advanceTimersByTimeAsync(50);
+  await rejection;
+  expect((firstRequest(fetchMock).init.signal as AbortSignal).aborted).toBe(
+    true,
+  );
+  expect(vi.getTimerCount()).toBe(0);
 });

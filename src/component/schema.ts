@@ -3,8 +3,8 @@ import { v } from "convex/values";
 import {
   vEmailEvent,
   vEventType,
-  vOptions,
   vStatus,
+  vStoredOptions,
   vTemplate,
 } from "./shared.js";
 
@@ -34,8 +34,14 @@ export default defineSchema({
     event: vEmailEvent,
     attempts: v.number(),
   }).index("by_eventId", ["eventId"]),
+  migrationLeases: defineTable({
+    name: v.string(),
+    expiresAt: v.number(),
+  }).index("by_name", ["name"]),
   emails: defineTable({
-    options: vOptions,
+    // New writes never contain the raw API key. Legacy rows may retain it
+    // temporarily until `scrubApiKeys` can safely remove it.
+    options: vStoredOptions,
     from: v.string(),
     to: v.union(v.array(v.string()), v.string()),
     cc: v.optional(v.array(v.string())),

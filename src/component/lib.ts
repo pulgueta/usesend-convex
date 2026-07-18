@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import {
+  env,
   internalAction,
   mutation,
   type MutationCtx,
@@ -21,9 +22,11 @@ import {
 } from "./shared.js";
 import type { FunctionHandle } from "convex/server";
 import type { EmailEvent, RunMutationCtx, RunQueryCtx } from "./shared.js";
+import { paginator } from "convex-helpers/server/pagination";
 import { attemptToParse } from "./utils.js";
 import { computeEmailUpdateFromEvent, FINALIZED_EPOCH } from "./events.js";
 import { parseBatchResponse, runtimeConfigKey } from "./batch.js";
+import schema from "./schema.js";
 
 // Configuration constants
 const SEGMENT_MS = 125;
@@ -37,7 +40,16 @@ const ABANDONED_EMAIL_RETENTION_MS = 1000 * 60 * 60 * 24 * 30; // 30 days
 const WEBHOOK_RETRY_DELAY_MS = 1000;
 const MAX_WEBHOOK_RETRY_ATTEMPTS = 6;
 const WEBHOOK_RETRY_MAX_DELAY_MS = 30_000;
+const API_KEY_SCRUB_LEASE_MS = 5 * 60 * 1000;
+const CLEANUP_EVENT_BATCH_SIZE = 100;
 const ABANDONED_STATUSES: Array<"waiting" | "queued"> = ["waiting", "queued"];
+
+const runtimeEmailDocValidator = schema.tables.emails.validator.extend({
+  _id: v.id("emails"),
+  _creationTime: v.number(),
+  options: vOptions,
+  legacyApiKey: v.boolean(),
+});
 
 const PERMANENT_ERROR_CODES = new Set([
   400, 401, 403, 404, 405, 406, 407, 410, 411, 413, 414, 415, 416, 418, 422,
@@ -85,13 +97,15 @@ export const cleanupOldEmails = mutation({
         q.lt("finalizedAt", Date.now() - olderThan),
       )
       .take(CLEANUP_BATCH_SIZE);
+    let needsContinuation = false;
     for (const email of oldAndDone) {
-      await cleanupEmail(ctx, email);
+      needsContinuation =
+        !(await cleanupEmail(ctx, email)) || needsContinuation;
     }
     if (oldAndDone.length > 0) {
       console.log(`Cleaned up ${oldAndDone.length} emails`);
     }
-    if (oldAndDone.length === CLEANUP_BATCH_SIZE) {
+    if (oldAndDone.length === CLEANUP_BATCH_SIZE || needsContinuation) {
       await ctx.scheduler.runAfter(0, api.lib.cleanupOldEmails, {
         olderThan,
       });
@@ -426,7 +440,6 @@ async function enqueueBatch(
     ctx,
     internal.lib.callUseSendAPIWithBatch,
     {
-      apiKey: options.apiKey,
       baseUrl: options.baseUrl,
       requestTimeoutMs: options.requestTimeoutMs,
       emails: emails.map((email) => email._id),
@@ -471,7 +484,7 @@ export const makeBatch = internalMutation({
       { options: RuntimeConfig; emails: Doc<"emails">[] }
     >();
     for (const email of emails) {
-      const key = await runtimeConfigKey(email.options);
+      const key = runtimeConfigKey(email.options);
       const batch = batches.get(key);
       if (batch) {
         batch.emails.push(email);
@@ -528,16 +541,23 @@ async function getAllContent(
   return new Map(docs.map((doc) => [doc.id, doc.content]));
 }
 
-// Call useSend batch API
 export const callUseSendAPIWithBatch = internalAction({
   args: {
-    apiKey: v.string(),
     baseUrl: v.string(),
     requestTimeoutMs: v.number(),
     emails: v.array(v.id("emails")),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
+    const apiKey = env.USESEND_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        "USESEND_API_KEY is not set for the usesend component. Bind it in " +
+          "convex.config.ts: app.use(usesend, { env: { USESEND_API_KEY: ... } })",
+      );
+    }
+    const baseUrl = env.USESEND_BASE_URL || args.baseUrl;
+
     const batchPayload = await createUseSendBatchPayload(ctx, args.emails);
 
     if (batchPayload === null) {
@@ -551,12 +571,12 @@ export const callUseSendAPIWithBatch = internalAction({
     const timeout = setTimeout(() => controller.abort(), args.requestTimeoutMs);
     let response: Response;
     try {
-      response = await fetch(`${args.baseUrl}/api/v1/emails/batch`, {
+      response = await fetch(`${baseUrl}/api/v1/emails/batch`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${args.apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
-          "Idempotency-Key": args.emails[0].toString(),
+          "Idempotency-Key": emailIds[0].toString(),
         },
         body,
         signal: controller.signal,
@@ -568,7 +588,7 @@ export const callUseSendAPIWithBatch = internalAction({
     if (!response.ok) {
       if (PERMANENT_ERROR_CODES.has(response.status)) {
         await ctx.runMutation(internal.lib.markEmailsFailed, {
-          emailIds: args.emails,
+          emailIds,
           errorMessage: `useSend API error: ${response.status} ${response.statusText} ${await response.text()}`,
         });
         return null;
@@ -577,8 +597,6 @@ export const callUseSendAPIWithBatch = internalAction({
       throw new Error(`useSend API error: ${errorText}`);
     }
 
-    // useSend returns batch results in request order; validate the complete
-    // ordered response before persisting any mapping.
     const usesendIds = parseBatchResponse(
       await response.json(),
       emailIds.length,
@@ -648,7 +666,10 @@ async function markEmailsFailedHandler(
       if (!email || email.status !== "queued") {
         return;
       }
+      const options = { ...email.options };
+      delete options.apiKey;
       await ctx.db.patch(emailId, {
+        options,
         status: "failed",
         failed: true,
         errorMessage: args.errorMessage,
@@ -688,7 +709,6 @@ export const onEmailComplete = emailPool.defineOnComplete({
   },
 });
 
-// Create batch payload for useSend API
 async function createUseSendBatchPayload(
   ctx: ActionCtx,
   emailIds: Id<"emails">[],
@@ -696,7 +716,17 @@ async function createUseSendBatchPayload(
   const allEmails = await ctx.runQuery(internal.lib.getEmailsByIds, {
     emailIds,
   });
-  const emails = allEmails.filter((e) => e.status === "queued");
+  const queued = allEmails.filter((e) => e.status === "queued");
+  const legacy = queued.filter((e) => e.legacyApiKey);
+  if (legacy.length > 0) {
+    await ctx.runMutation(internal.lib.markEmailsFailed, {
+      emailIds: legacy.map((e) => e._id),
+      errorMessage:
+        "Email was enqueued by a previous component version. Re-enqueue it " +
+        "after upgrading so no API key is carried in durable arguments.",
+    });
+  }
+  const emails = queued.filter((e) => !e.legacyApiKey);
   if (emails.length === 0) {
     return null;
   }
@@ -708,7 +738,7 @@ async function createUseSendBatchPayload(
       .filter((id): id is Id<"content"> => id !== undefined),
   );
 
-  const batchPayload = emails.map((email: Doc<"emails">) => {
+  const batchPayload = emails.map((email) => {
     const payload: Record<string, unknown> = {
       from: email.from,
       to: Array.isArray(email.to) ? email.to : [email.to],
@@ -722,7 +752,16 @@ async function createUseSendBatchPayload(
 
     if (email.template) {
       payload.templateId = email.template.id;
-      payload.variables = email.template.variables;
+      // The useSend batch API only accepts string variable values; numbers
+      // are allowed at the client boundary for convenience.
+      payload.variables =
+        email.template.variables &&
+        Object.fromEntries(
+          Object.entries(email.template.variables).map(([key, value]) => [
+            key,
+            String(value),
+          ]),
+        );
       if (email.subject) {
         payload.subject = email.subject;
       }
@@ -771,21 +810,22 @@ export const getAllContentByIds = internalQuery({
 
 export const getEmailsByIds = internalQuery({
   args: { emailIds: v.array(v.id("emails")) },
+  returns: v.array(runtimeEmailDocValidator),
   handler: async (ctx, args) => {
     const emails = await Promise.all(args.emailIds.map((id) => ctx.db.get(id)));
-    return emails.filter((e): e is Doc<"emails"> => e !== null);
-  },
-});
-
-export const getEmailByUseSendId = internalQuery({
-  args: { usesendId: v.string() },
-  handler: async (ctx, args) => {
-    const email = await ctx.db
-      .query("emails")
-      .withIndex("by_usesendId", (q) => q.eq("usesendId", args.usesendId))
-      .unique();
-    if (!email) throw new Error("Email not found for usesendId");
-    return email;
+    return emails
+      .filter((email): email is Doc<"emails"> => email !== null)
+      .map((email) => ({
+        ...email,
+        options: {
+          initialBackoffMs: email.options.initialBackoffMs,
+          retryAttempts: email.options.retryAttempts,
+          requestTimeoutMs: email.options.requestTimeoutMs,
+          baseUrl: email.options.baseUrl,
+          onEmailEvent: email.options.onEmailEvent,
+        },
+        legacyApiKey: email.options.apiKey !== undefined,
+      }));
   },
 });
 
@@ -927,7 +967,20 @@ async function enqueueCallbackIfExists(
   }
 }
 
-async function cleanupEmail(ctx: MutationCtx, email: Doc<"emails">) {
+async function cleanupEmail(
+  ctx: MutationCtx,
+  email: Doc<"emails">,
+): Promise<boolean> {
+  const events = await ctx.db
+    .query("deliveryEvents")
+    .withIndex("by_emailId_eventType", (q) => q.eq("emailId", email._id))
+    .take(CLEANUP_EVENT_BATCH_SIZE);
+  for (const event of events) {
+    await ctx.db.delete(event._id);
+  }
+  if (events.length === CLEANUP_EVENT_BATCH_SIZE) {
+    return false;
+  }
   await ctx.db.delete(email._id);
   if (email.text) {
     await ctx.db.delete(email.text);
@@ -935,13 +988,7 @@ async function cleanupEmail(ctx: MutationCtx, email: Doc<"emails">) {
   if (email.html) {
     await ctx.db.delete(email.html);
   }
-  const events = await ctx.db
-    .query("deliveryEvents")
-    .withIndex("by_emailId_eventType", (q) => q.eq("emailId", email._id))
-    .collect();
-  for (const event of events) {
-    await ctx.db.delete(event._id);
-  }
+  return true;
 }
 
 // Clean up abandoned emails
@@ -964,19 +1011,105 @@ export const cleanupAbandonedEmails = mutation({
     );
     const oldAndAbandoned = [...waiting, ...queued];
 
+    let needsContinuation = false;
     for (const email of oldAndAbandoned) {
-      await cleanupEmail(ctx, email);
+      needsContinuation =
+        !(await cleanupEmail(ctx, email)) || needsContinuation;
     }
     if (oldAndAbandoned.length > 0) {
       console.log(`Cleaned up ${oldAndAbandoned.length} abandoned emails`);
     }
     if (
       waiting.length === CLEANUP_BATCH_SIZE ||
-      queued.length === CLEANUP_BATCH_SIZE
+      queued.length === CLEANUP_BATCH_SIZE ||
+      needsContinuation
     ) {
       await ctx.scheduler.runAfter(0, api.lib.cleanupAbandonedEmails, {
         olderThan,
       });
+    }
+    return null;
+  },
+});
+
+// One-time migration for documents written by <= 0.1.1.
+export const scrubApiKeys = mutation({
+  args: {},
+  returns: v.null(),
+  handler: async (ctx) => {
+    const now = Date.now();
+    const existing = await ctx.db
+      .query("migrationLeases")
+      .withIndex("by_name", (q) => q.eq("name", "scrubApiKeys"))
+      .unique();
+    if (existing && existing.expiresAt > now) {
+      return null;
+    }
+    if (existing) {
+      await ctx.db.delete(existing._id);
+    }
+    const leaseId = await ctx.db.insert("migrationLeases", {
+      name: "scrubApiKeys",
+      expiresAt: now + API_KEY_SCRUB_LEASE_MS,
+    });
+    await ctx.scheduler.runAfter(0, internal.lib.scrubApiKeysBatch, {
+      leaseId,
+    });
+    return null;
+  },
+});
+
+export const scrubApiKeysBatch = internalMutation({
+  args: {
+    leaseId: v.id("migrationLeases"),
+    cursor: v.optional(v.string()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const lease = await ctx.db.get(args.leaseId);
+    if (!lease) {
+      return null;
+    }
+    await ctx.db.patch(lease._id, {
+      expiresAt: Date.now() + API_KEY_SCRUB_LEASE_MS,
+    });
+    const SCRUB_BATCH_SIZE = 100;
+    const { page, isDone, continueCursor } = await paginator(ctx.db, schema)
+      .query("emails")
+      .paginate({ numItems: SCRUB_BATCH_SIZE, cursor: args.cursor ?? null });
+
+    let scrubbed = 0;
+    for (const email of page) {
+      if (email.options.apiKey !== undefined) {
+        const options = { ...email.options };
+        delete options.apiKey;
+        const active = email.status === "waiting" || email.status === "queued";
+        await ctx.db.patch(email._id, {
+          options,
+          ...(active
+            ? {
+                status: "failed" as const,
+                failed: true,
+                errorMessage:
+                  "Email was enqueued by a previous component version. " +
+                  "Re-enqueue it after upgrading.",
+                finalizedAt: Date.now(),
+              }
+            : {}),
+        });
+        scrubbed += 1;
+      }
+    }
+    if (scrubbed > 0) {
+      console.log(`Scrubbed legacy API keys from ${scrubbed} emails`);
+    }
+    if (!isDone) {
+      await ctx.scheduler.runAfter(0, internal.lib.scrubApiKeysBatch, {
+        leaseId: lease._id,
+        cursor: continueCursor,
+      });
+    } else {
+      await ctx.db.delete(lease._id);
     }
     return null;
   },

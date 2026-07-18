@@ -1,8 +1,5 @@
 import { literals } from "convex-helpers/validators";
-import {
-  type GenericActionCtx,
-  type GenericDataModel,
-} from "convex/server";
+import { type GenericActionCtx, type GenericDataModel } from "convex/server";
 import { type Infer, v } from "convex/values";
 
 // Validator for the onEmailEvent option.
@@ -30,17 +27,26 @@ export const vTemplate = v.object({
 });
 export type Template = Infer<typeof vTemplate>;
 
-// Validator for the runtime options used by the component.
+// API keys are intentionally absent from component runtime options.
 export const vOptions = v.object({
   initialBackoffMs: v.number(),
   retryAttempts: v.number(),
   requestTimeoutMs: v.number(),
-  apiKey: v.string(),
   baseUrl: v.string(),
   onEmailEvent: v.optional(onEmailEvent),
 });
 
 export type RuntimeConfig = Infer<typeof vOptions>;
+
+// Temporary schema compatibility for rows written by <= 0.1.1.
+export const vStoredOptions = v.object({
+  initialBackoffMs: v.number(),
+  retryAttempts: v.number(),
+  requestTimeoutMs: v.number(),
+  apiKey: v.optional(v.string()),
+  baseUrl: v.string(),
+  onEmailEvent: v.optional(onEmailEvent),
+});
 
 const commonFields = {
   id: v.string(),

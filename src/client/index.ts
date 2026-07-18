@@ -39,6 +39,7 @@ export const vOnEmailEventArgs = v.object({
 });
 
 type Config = RuntimeConfig & {
+  apiKey: string;
   webhookSecret: string;
 };
 
@@ -57,6 +58,13 @@ export type UseSendOptions = {
   /**
    * The API key to use for the useSend API.
    * If not provided, the API key will be read from the environment variable USESEND_API_KEY.
+   *
+   * This key is used app-side only by the direct REST client
+   * ({@link UseSend.api}) and any manual-send callback that uses it. It is never
+   * forwarded to (or persisted by) the component. Durable batch sends use the
+   * component's own `USESEND_API_KEY` environment variable, bound in
+   * `convex.config.ts` via
+   * `app.use(usesend, { env: { USESEND_API_KEY: ... } })`.
    */
   apiKey?: string;
 
@@ -113,8 +121,11 @@ async function configToRuntimeConfig(
     }
   > | null,
 ): Promise<RuntimeConfig> {
+  // Note: the API key is deliberately NOT part of the runtime config sent to
+  // the component. It would be persisted on every durable email row. The
+  // component resolves the key from its own USESEND_API_KEY environment
+  // variable at send time instead (see convex.config.ts).
   return {
-    apiKey: config.apiKey,
     baseUrl: config.baseUrl,
     initialBackoffMs: config.initialBackoffMs,
     retryAttempts: config.retryAttempts,
@@ -328,8 +339,6 @@ export class UseSend {
     ctx: RunMutationCtx,
     options: SendEmailOptions,
   ): Promise<EmailId> {
-    if (this.config.apiKey === "") throw new Error("API key is not set");
-
     const id = await ctx.runMutation(this.component.lib.sendEmail, {
       options: await configToRuntimeConfig(this.config, this.onEmailEvent),
       ...options,

@@ -39,17 +39,52 @@ npm install @pulgueta/usesend-convex
 Create a [useSend](https://usesend.com) account and grab an API key. Set it to
 `USESEND_API_KEY` in your deployment environment.
 
-Next, add the component to your Convex app via `convex/convex.config.ts`:
+Next, add the component to your Convex app via `convex/convex.config.ts`. Every
+environment variable the component can use is declared on the component and
+bound when installing it — the recommended setup binds them by reference to your
+deployment's env vars so the credential stays in deployment secret storage and
+is resolved at send time (it is never stored in component documents by current
+versions):
 
 ```ts
 import { defineApp } from "convex/server";
+import { v } from "convex/values";
 import usesend from "@pulgueta/usesend-convex/convex.config.js";
 
-const app = defineApp();
-app.use(usesend);
+const app = defineApp({
+  env: {
+    USESEND_API_KEY: v.string(),
+    USESEND_BASE_URL: v.optional(v.string()),
+  },
+});
+app.use(usesend, {
+  env: {
+    USESEND_API_KEY: app.env.USESEND_API_KEY,
+    // optionals
+    USESEND_BASE_URL: app.env.USESEND_BASE_URL,
+  },
+});
 
 export default app;
 ```
+
+If upgrading from `<= 0.1.1`, legacy email rows may still contain
+`options.apiKey`. After deploying, call `components.usesend.lib.scrubApiKeys`
+from an authenticated app mutation. Active legacy rows are failed while their
+keys are removed; re-enqueue those emails after the upgrade. Legacy work is
+never sent with a secret-bearing argument shape.
+
+The component's env vars:
+
+- `USESEND_API_KEY` (required): the useSend API key used by the durable batch
+  sender, resolved from deployment secret storage at send time.
+- `USESEND_BASE_URL` (optional): base URL for self-hosted useSend instances.
+  When bound and set it takes precedence for durable batch sends; otherwise the
+  per-instance `baseUrl` option (default `https://app.usesend.com`) is used.
+
+`USESEND_WEBHOOK_SECRET` is intentionally not a component env var: webhook
+verification runs in your app's HTTP action (see below), so the secret is read
+app-side by the `UseSend` client.
 
 Then you can use it in your Convex functions:
 
@@ -155,7 +190,11 @@ There is a `UseSendOptions` argument to the component constructor to help
 customize its behavior:
 
 - `apiKey`: Provide the useSend API key instead of having it read from the
-  environment variable.
+  environment variable. This key is used app-side only by the direct REST client
+  (`usesend.api`) and manual-send callbacks that use it. Current writes never
+  forward or persist it in the component — durable batch sends use the
+  component's `USESEND_API_KEY` env binding from `convex.config.ts`. Upgrades
+  from `<= 0.1.1` must run the migration described above for legacy rows.
 - `baseUrl`: The base URL for the useSend API (defaults to
   `https://app.usesend.com`). Set this if you're using a self-hosted useSend
   instance.
