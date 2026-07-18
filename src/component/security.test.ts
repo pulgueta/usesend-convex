@@ -186,4 +186,77 @@ describe("api key persistence (issue #4)", () => {
     const docs = await collectAllDocuments(t);
     expect(JSON.stringify(docs)).not.toContain(TEST_API_KEY);
   });
+
+  test("scrubApiKeys paginates past batches of rows sharing a creation time", async () => {
+    const t = initConvexTest();
+
+    // With fake timers frozen, bulk inserts share a creation timestamp —
+    // the scenario where a plain _creationTime cursor would skip rows.
+    const ROWS = 150;
+    await t.run(async (ctx) => {
+      for (let i = 0; i < ROWS; i++) {
+        await ctx.db.insert("emails", {
+          options: { ...options, apiKey: TEST_API_KEY },
+          from: "sender@example.com",
+          to: ["recipient@example.com"],
+          subject: `Legacy ${i}`,
+          replyTo: [],
+          segment: Infinity,
+          status: "sent",
+          bounced: false,
+          complained: false,
+          failed: false,
+          deliveryDelayed: false,
+          opened: false,
+          clicked: false,
+          retentionAnchor: 0,
+          finalizedAt: 0,
+        });
+      }
+    });
+
+    await t.mutation(api.lib.scrubApiKeys, {});
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
+
+    const remaining = await t.run(async (ctx) => {
+      const emails = await ctx.db.query("emails").collect();
+      return emails.filter((email) => email.options.apiKey !== undefined);
+    });
+    expect(remaining).toHaveLength(0);
+    const docs = await collectAllDocuments(t);
+    expect(JSON.stringify(docs)).not.toContain(TEST_API_KEY);
+  });
+
+  test("the batch sender tolerates and ignores a legacy apiKey arg", async () => {
+    const t = initConvexTest();
+    const emailId = await t.mutation(api.lib.createManualEmail, {
+      options,
+      from: "sender@example.com",
+      to: "recipient@example.com",
+      subject: "Hello",
+    });
+    await t.run((ctx) => ctx.db.patch(emailId, { status: "queued" }));
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ emailId: "usesend_1", status: "queued" }],
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Workpool jobs enqueued by <= 0.1.1 still carry apiKey in their
+    // persisted args; they must pass validation and use the env credential.
+    await t.action(internal.lib.callUseSendAPIWithBatch, {
+      apiKey: "stale-legacy-key",
+      baseUrl: options.baseUrl,
+      requestTimeoutMs: options.requestTimeoutMs,
+      emails: [emailId],
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect((init.headers as Record<string, string>)["Authorization"]).toBe(
+      `Bearer ${TEST_API_KEY}`,
+    );
+  });
 });

@@ -173,7 +173,7 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
       scrubApiKeys: FunctionReference<
         "mutation",
         "internal",
-        { cursor?: number },
+        { cursor?: string },
         null,
         Name
       >;

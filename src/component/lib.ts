@@ -533,6 +533,11 @@ async function getAllContent(
 // deployment secret storage, never in component documents or function args.
 export const callUseSendAPIWithBatch = internalAction({
   args: {
+    // Deprecated and ignored: accepted only so workpool jobs enqueued by
+    // <= 0.1.1 (whose persisted args still carry the key) pass validation
+    // while they drain after an upgrade. The env binding below is always
+    // the credential actually used.
+    apiKey: v.optional(v.string()),
     baseUrl: v.string(),
     requestTimeoutMs: v.number(),
     emails: v.array(v.id("emails")),
@@ -1000,19 +1005,18 @@ export const cleanupAbandonedEmails = mutation({
 // from stored rows in batches, rescheduling itself until the table has been
 // fully scanned. Safe to run repeatedly.
 export const scrubApiKeys = mutation({
-  args: { cursor: v.optional(v.number()) },
+  args: { cursor: v.optional(v.string()) },
   returns: v.null(),
   handler: async (ctx, args) => {
     const SCRUB_BATCH_SIZE = 100;
-    const emails = await ctx.db
+    // A real pagination cursor (not a _creationTime bound) so rows sharing a
+    // creation timestamp are never skipped across page boundaries.
+    const { page, isDone, continueCursor } = await ctx.db
       .query("emails")
-      .withIndex("by_creation_time", (q) =>
-        args.cursor === undefined ? q : q.gt("_creationTime", args.cursor!),
-      )
-      .take(SCRUB_BATCH_SIZE);
+      .paginate({ numItems: SCRUB_BATCH_SIZE, cursor: args.cursor ?? null });
 
     let scrubbed = 0;
-    for (const email of emails) {
+    for (const email of page) {
       if (email.options.apiKey !== undefined) {
         const options = { ...email.options };
         delete options.apiKey;
@@ -1023,9 +1027,9 @@ export const scrubApiKeys = mutation({
     if (scrubbed > 0) {
       console.log(`Scrubbed legacy API keys from ${scrubbed} emails`);
     }
-    if (emails.length === SCRUB_BATCH_SIZE) {
+    if (!isDone) {
       await ctx.scheduler.runAfter(0, api.lib.scrubApiKeys, {
-        cursor: emails[emails.length - 1]._creationTime,
+        cursor: continueCursor,
       });
     }
     return null;
