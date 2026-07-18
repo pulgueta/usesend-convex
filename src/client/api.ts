@@ -22,7 +22,7 @@ export class UseSendApiError extends Error {
   }
 }
 
-type QueryValue = string | number | string[] | undefined;
+type QueryValue = string | number | undefined;
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 
@@ -121,7 +121,7 @@ export type ListEmailsParams = {
   startDate?: string;
   /** ISO 8601 timestamp. */
   endDate?: string;
-  domainId?: string | string[];
+  domainId?: string;
 };
 
 /* Contacts */
@@ -163,14 +163,15 @@ export type ContactBook = {
   teamId: number;
   properties: Record<string, string>;
   /** Allowed personalization variables for contacts in this book. */
-  variables?: string[];
-  emoji?: string;
+  variables: string[];
+  emoji: string;
   doubleOptInEnabled?: boolean;
   doubleOptInFrom?: string | null;
   doubleOptInSubject?: string | null;
   doubleOptInContent?: string | null;
-  createdAt?: string;
-  updatedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  _count?: { contacts: number };
 };
 
 export type CreateContactBookRequest = {
@@ -200,27 +201,28 @@ export type Domain = {
   name: string;
   teamId: number;
   status: DomainStatus;
-  region: string;
-  clickTracking: boolean;
-  openTracking: boolean;
+  region?: string;
+  clickTracking?: boolean;
+  openTracking?: boolean;
   publicKey: string;
   dkimStatus?: string | null;
   spfDetails?: string | null;
   createdAt: string;
   updatedAt: string;
-  dmarcAdded: boolean;
-  isVerifying: boolean;
+  dmarcAdded?: boolean;
+  isVerifying?: boolean;
   errorMessage?: string | null;
   subdomain?: string | null;
   verificationError?: string | null;
   lastCheckedTime?: string | null;
-  dnsRecords?: Array<{
-    type: string;
+  dnsRecords: Array<{
+    type: "MX" | "TXT";
     name: string;
     value: string;
-    ttl?: string;
-    priority?: number;
-    status?: string;
+    ttl: string;
+    priority?: string | null;
+    status: DomainStatus;
+    recommended?: boolean;
   }>;
 };
 
@@ -363,9 +365,7 @@ export class UseSendApi {
     const url = new URL(`${this.baseUrl}/api/v1${path}`);
     for (const [key, value] of Object.entries(options?.query ?? {})) {
       if (value === undefined) continue;
-      for (const item of Array.isArray(value) ? value : [value]) {
-        url.searchParams.append(key, String(item));
-      }
+      url.searchParams.append(key, String(value));
     }
 
     const headers: Record<string, string> = {
