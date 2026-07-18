@@ -21,6 +21,8 @@ const FcEmail: FC<{ name: string }> = ({ name }) => (
   </Html>
 );
 
+const EmptyEmail: FC = () => null;
+
 test("renders React Email HTML and text from an action", async () => {
   const t = initConvexTest();
   const rendered = await t.action(async () =>
@@ -60,6 +62,9 @@ test("enqueues a rendered React Email through the component", async () => {
 
 test("rejects nodes that render no content", async () => {
   await expect(renderEmail(null)).rejects.toThrow("rendered no content");
+  await expect(renderEmail(<EmptyEmail />)).rejects.toThrow(
+    "rendered no content",
+  );
 });
 
 test("accepts a direct call of an FC-typed component", async () => {

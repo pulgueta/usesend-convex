@@ -36,13 +36,17 @@ export async function renderEmail(
   element: ReactNode | Promise<ReactNode>,
 ): Promise<RenderedEmail> {
   const node = await element;
-  if (node == null || typeof node === "boolean") {
-    throw new Error("The provided React node rendered no content");
-  }
   const [html, text] = await Promise.all([
     render(node),
     render(node, { plainText: true }),
   ]);
+  const htmlContent = html
+    .replace(/<!doctype[^>]*>/gi, "")
+    .replace(/<!--.*?-->/gs, "")
+    .trim();
+  if (htmlContent === "" && text.trim() === "") {
+    throw new Error("The provided React node rendered no content");
+  }
   return { html, text };
 }
 
