@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.2.0
+
 - **Security** (#4): stop persisting the raw useSend API key in durable `emails`
   documents. The component now declares a `USESEND_API_KEY` environment variable
   and resolves the credential at send time from deployment secret storage.
