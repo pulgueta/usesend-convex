@@ -149,8 +149,8 @@ export type CreateContactRequest = {
 export type UpdateContactRequest = Omit<CreateContactRequest, "email">;
 
 export type ListContactsParams = {
-  emails?: string | string[];
-  ids?: string | string[];
+  emails?: string;
+  ids?: string;
   page?: number;
   limit?: number;
 };

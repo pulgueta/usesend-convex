@@ -235,6 +235,37 @@ describe("component lib", () => {
     expect(email).toMatchObject({ status: "sent", usesendId: "usesend_1" });
   });
 
+  test("serializes template variables as strings for the batch API", async () => {
+    const t = initConvexTest();
+    const emailId = await t.mutation(api.lib.sendEmail, {
+      options,
+      from: "sender@example.com",
+      to: ["recipient@example.com"],
+      template: { id: "template_1", variables: { name: "Ada", count: 3 } },
+    });
+    await t.run((ctx) => ctx.db.patch(emailId, { status: "queued" }));
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ emailId: "usesend_1", status: "queued" }],
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await t.action(internal.lib.callUseSendAPIWithBatch, {
+      baseUrl: options.baseUrl,
+      requestTimeoutMs: options.requestTimeoutMs,
+      emails: [emailId],
+    });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    const [payload] = JSON.parse(init.body as string);
+    // The useSend batch schema only permits string variable values.
+    expect(payload.templateId).toBe("template_1");
+    expect(payload.variables).toEqual({ name: "Ada", count: "3" });
+  });
+
   test("prefers the USESEND_BASE_URL component binding over stored options", async () => {
     vi.stubEnv("USESEND_BASE_URL", "https://selfhosted.example.com");
     const t = initConvexTest();

@@ -766,7 +766,16 @@ async function createUseSendBatchPayload(
 
     if (email.template) {
       payload.templateId = email.template.id;
-      payload.variables = email.template.variables;
+      // The useSend batch API only accepts string variable values; numbers
+      // are allowed at the client boundary for convenience.
+      payload.variables =
+        email.template.variables &&
+        Object.fromEntries(
+          Object.entries(email.template.variables).map(([key, value]) => [
+            key,
+            String(value),
+          ]),
+        );
       if (email.subject) {
         payload.subject = email.subject;
       }
