@@ -3,8 +3,8 @@ import { v } from "convex/values";
 import {
   vEmailEvent,
   vEventType,
-  vOptions,
   vStatus,
+  vStoredOptions,
   vTemplate,
 } from "./shared.js";
 
@@ -35,7 +35,8 @@ export default defineSchema({
     attempts: v.number(),
   }).index("by_eventId", ["eventId"]),
   emails: defineTable({
-    options: vOptions,
+    // Never contains the raw API key; see `vStoredOptions` in shared.ts.
+    options: vStoredOptions,
     from: v.string(),
     to: v.union(v.array(v.string()), v.string()),
     cc: v.optional(v.array(v.string())),

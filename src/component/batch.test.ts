@@ -3,7 +3,6 @@ import { parseBatchResponse, runtimeConfigKey } from "./batch.js";
 import type { RuntimeConfig } from "./shared.js";
 
 const options: RuntimeConfig = {
-  apiKey: "secret-api-key",
   baseUrl: "https://app.usesend.com",
   initialBackoffMs: 30_000,
   retryAttempts: 5,
@@ -11,14 +10,23 @@ const options: RuntimeConfig = {
 };
 
 describe("runtimeConfigKey", () => {
-  test("uses a stable digest instead of the raw API key", async () => {
-    const key = await runtimeConfigKey(options);
+  test("is stable and contains no secret material", () => {
+    const key = runtimeConfigKey(options);
 
-    expect(key).not.toContain(options.apiKey);
-    await expect(runtimeConfigKey(options)).resolves.toBe(key);
-    await expect(
-      runtimeConfigKey({ ...options, apiKey: "different-api-key" }),
-    ).resolves.not.toBe(key);
+    expect(runtimeConfigKey(options)).toBe(key);
+    expect(runtimeConfigKey({ ...options, retryAttempts: 6 })).not.toBe(key);
+  });
+
+  test("ignores a legacy stored apiKey field when grouping", () => {
+    const legacyOptions = {
+      ...options,
+      apiKey: "legacy-secret-api-key",
+    } as RuntimeConfig;
+
+    expect(runtimeConfigKey(legacyOptions)).toBe(runtimeConfigKey(options));
+    expect(runtimeConfigKey(legacyOptions)).not.toContain(
+      "legacy-secret-api-key",
+    );
   });
 });
 

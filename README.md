@@ -39,14 +39,26 @@ npm install @pulgueta/usesend-convex
 Create a [useSend](https://usesend.com) account and grab an API key. Set it to
 `USESEND_API_KEY` in your deployment environment.
 
-Next, add the component to your Convex app via `convex/convex.config.ts`:
+Next, add the component to your Convex app via `convex/convex.config.ts`. The
+component declares a `USESEND_API_KEY` environment variable that you bind when
+installing it — the recommended setup binds it by reference to your
+deployment's `USESEND_API_KEY` env var so the credential stays in deployment
+secret storage and is resolved at send time (it is never stored in component
+documents):
 
 ```ts
 import { defineApp } from "convex/server";
+import { v } from "convex/values";
 import usesend from "@pulgueta/usesend-convex/convex.config.js";
 
-const app = defineApp();
-app.use(usesend);
+const app = defineApp({
+  env: {
+    USESEND_API_KEY: v.string(),
+  },
+});
+app.use(usesend, {
+  env: { USESEND_API_KEY: app.env.USESEND_API_KEY },
+});
 
 export default app;
 ```
@@ -155,7 +167,10 @@ There is a `UseSendOptions` argument to the component constructor to help
 customize its behavior:
 
 - `apiKey`: Provide the useSend API key instead of having it read from the
-  environment variable.
+  environment variable. This key is used app-side only (the direct REST client
+  `usesend.api`, manual sends, and a preflight check before enqueueing). It is
+  never forwarded to or persisted by the component — durable batch sends use
+  the component's `USESEND_API_KEY` env binding from `convex.config.ts`.
 - `baseUrl`: The base URL for the useSend API (defaults to
   `https://app.usesend.com`). Set this if you're using a self-hosted useSend
   instance.

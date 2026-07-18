@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+- **Security** (#4): stop persisting the raw useSend API key in durable
+  `emails` documents. The component now declares a `USESEND_API_KEY`
+  environment variable and resolves the credential at send time from
+  deployment secret storage.
+- **Breaking**: apps must bind the component env var when installing it in
+  `convex/convex.config.ts`:
+
+  ```ts
+  const app = defineApp({ env: { USESEND_API_KEY: v.string() } });
+  app.use(usesend, { env: { USESEND_API_KEY: app.env.USESEND_API_KEY } });
+  ```
+
+  The `apiKey` client option is now app-side only (direct REST client, manual
+  sends, and a preflight check) and is no longer forwarded to the component.
+
+- Deployments upgrading with retained emails from `<= 0.1.1` keep passing
+  schema validation (the legacy stored field is tolerated but never written).
+  Run the new `lib.scrubApiKeys` component mutation once to strip previously
+  persisted keys from old rows.
+
 ## 0.1.1
 
 - Encode REST resource IDs before building request paths.

@@ -54,7 +54,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           from: string;
           headers?: Record<string, string>;
           options: {
-            apiKey: string;
             baseUrl: string;
             initialBackoffMs: number;
             onEmailEvent?: { fnHandle: string };
@@ -152,7 +151,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           html?: string;
           inReplyToId?: string;
           options: {
-            apiKey: string;
             baseUrl: string;
             initialBackoffMs: number;
             onEmailEvent?: { fnHandle: string };
@@ -170,6 +168,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           to: Array<string>;
         },
         string,
+        Name
+      >;
+      scrubApiKeys: FunctionReference<
+        "mutation",
+        "internal",
+        { cursor?: number },
+        null,
         Name
       >;
       updateManualEmail: FunctionReference<

@@ -6,12 +6,13 @@ import type { EmailEvent, RuntimeConfig } from "./shared.js";
 import { initConvexTest } from "./setup.test.js";
 
 const options: RuntimeConfig = {
-  apiKey: "test-api-key",
   baseUrl: "https://app.usesend.com",
   initialBackoffMs: 30000,
   retryAttempts: 5,
   requestTimeoutMs: 30000,
 };
+
+const TEST_ENV_API_KEY = "env-secret-api-key";
 
 function event(
   type: "email.delivered" | "email.cancelled",
@@ -60,10 +61,12 @@ async function createManualEmail(
 describe("component lib", () => {
   beforeEach(async () => {
     vi.useFakeTimers();
+    vi.stubEnv("USESEND_API_KEY", TEST_ENV_API_KEY);
   });
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   test("sendEmail creates an email record", async () => {
@@ -146,7 +149,7 @@ describe("component lib", () => {
   test("stores runtime options with each email", async () => {
     const t = initConvexTest();
     const firstId = await createManualEmail(t);
-    const secondOptions = { ...options, apiKey: "other-api-key" };
+    const secondOptions = { ...options, retryAttempts: 7 };
     const secondId = await t.mutation(api.lib.createManualEmail, {
       options: secondOptions,
       from: "sender@example.com",
@@ -223,7 +226,6 @@ describe("component lib", () => {
     );
 
     await t.action(internal.lib.callUseSendAPIWithBatch, {
-      apiKey: options.apiKey,
       baseUrl: options.baseUrl,
       requestTimeoutMs: options.requestTimeoutMs,
       emails: [emailId],
@@ -252,7 +254,6 @@ describe("component lib", () => {
 
     await expect(
       t.action(internal.lib.callUseSendAPIWithBatch, {
-        apiKey: options.apiKey,
         baseUrl: options.baseUrl,
         requestTimeoutMs: options.requestTimeoutMs,
         emails: [firstId, secondId],
@@ -284,7 +285,6 @@ describe("component lib", () => {
     );
 
     const request = t.action(internal.lib.callUseSendAPIWithBatch, {
-      apiKey: options.apiKey,
       baseUrl: options.baseUrl,
       requestTimeoutMs: 50,
       emails: [emailId],

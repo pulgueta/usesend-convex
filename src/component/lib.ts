@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import {
+  env,
   internalAction,
   mutation,
   type MutationCtx,
@@ -426,7 +427,6 @@ async function enqueueBatch(
     ctx,
     internal.lib.callUseSendAPIWithBatch,
     {
-      apiKey: options.apiKey,
       baseUrl: options.baseUrl,
       requestTimeoutMs: options.requestTimeoutMs,
       emails: emails.map((email) => email._id),
@@ -471,7 +471,7 @@ export const makeBatch = internalMutation({
       { options: RuntimeConfig; emails: Doc<"emails">[] }
     >();
     for (const email of emails) {
-      const key = await runtimeConfigKey(email.options);
+      const key = runtimeConfigKey(email.options);
       const batch = batches.get(key);
       if (batch) {
         batch.emails.push(email);
@@ -528,16 +528,25 @@ async function getAllContent(
   return new Map(docs.map((doc) => [doc.id, doc.content]));
 }
 
-// Call useSend batch API
+// Call useSend batch API. The API key is resolved from the component's
+// environment at execution time so the credential only ever lives in
+// deployment secret storage, never in component documents or function args.
 export const callUseSendAPIWithBatch = internalAction({
   args: {
-    apiKey: v.string(),
     baseUrl: v.string(),
     requestTimeoutMs: v.number(),
     emails: v.array(v.id("emails")),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
+    const apiKey = env.USESEND_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        "USESEND_API_KEY is not set for the usesend component. Bind it in " +
+          "convex.config.ts: app.use(usesend, { env: { USESEND_API_KEY: ... } })",
+      );
+    }
+
     const batchPayload = await createUseSendBatchPayload(ctx, args.emails);
 
     if (batchPayload === null) {
@@ -554,7 +563,7 @@ export const callUseSendAPIWithBatch = internalAction({
       response = await fetch(`${args.baseUrl}/api/v1/emails/batch`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${args.apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
           "Idempotency-Key": args.emails[0].toString(),
         },
@@ -976,6 +985,43 @@ export const cleanupAbandonedEmails = mutation({
     ) {
       await ctx.scheduler.runAfter(0, api.lib.cleanupAbandonedEmails, {
         olderThan,
+      });
+    }
+    return null;
+  },
+});
+
+// One-time migration for deployments upgrading from <= 0.1.1, which persisted
+// the raw useSend API key in `emails.options.apiKey`. Removes the legacy field
+// from stored rows in batches, rescheduling itself until the table has been
+// fully scanned. Safe to run repeatedly.
+export const scrubApiKeys = mutation({
+  args: { cursor: v.optional(v.number()) },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const SCRUB_BATCH_SIZE = 100;
+    const emails = await ctx.db
+      .query("emails")
+      .withIndex("by_creation_time", (q) =>
+        args.cursor === undefined ? q : q.gt("_creationTime", args.cursor!),
+      )
+      .take(SCRUB_BATCH_SIZE);
+
+    let scrubbed = 0;
+    for (const email of emails) {
+      if (email.options.apiKey !== undefined) {
+        const options = { ...email.options };
+        delete options.apiKey;
+        await ctx.db.patch(email._id, { options });
+        scrubbed += 1;
+      }
+    }
+    if (scrubbed > 0) {
+      console.log(`Scrubbed legacy API keys from ${scrubbed} emails`);
+    }
+    if (emails.length === SCRUB_BATCH_SIZE) {
+      await ctx.scheduler.runAfter(0, api.lib.scrubApiKeys, {
+        cursor: emails[emails.length - 1]._creationTime,
       });
     }
     return null;
