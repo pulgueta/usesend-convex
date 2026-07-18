@@ -546,6 +546,10 @@ export const callUseSendAPIWithBatch = internalAction({
           "convex.config.ts: app.use(usesend, { env: { USESEND_API_KEY: ... } })",
       );
     }
+    // The optional USESEND_BASE_URL component binding, when set, is the
+    // deployment-level source of truth; otherwise use the client-provided
+    // per-instance base URL.
+    const baseUrl = env.USESEND_BASE_URL || args.baseUrl;
 
     const batchPayload = await createUseSendBatchPayload(ctx, args.emails);
 
@@ -560,7 +564,7 @@ export const callUseSendAPIWithBatch = internalAction({
     const timeout = setTimeout(() => controller.abort(), args.requestTimeoutMs);
     let response: Response;
     try {
-      response = await fetch(`${args.baseUrl}/api/v1/emails/batch`, {
+      response = await fetch(`${baseUrl}/api/v1/emails/batch`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${apiKey}`,

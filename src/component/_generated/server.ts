@@ -35,6 +35,7 @@ import type { DataModel } from "./dataModel.js";
  */
 type Env = {
   readonly USESEND_API_KEY: string;
+  readonly USESEND_BASE_URL: string | undefined;
 };
 
 /**

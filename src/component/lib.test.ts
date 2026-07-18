@@ -235,6 +235,58 @@ describe("component lib", () => {
     expect(email).toMatchObject({ status: "sent", usesendId: "usesend_1" });
   });
 
+  test("prefers the USESEND_BASE_URL component binding over stored options", async () => {
+    vi.stubEnv("USESEND_BASE_URL", "https://selfhosted.example.com");
+    const t = initConvexTest();
+    const emailId = await createManualEmail(t);
+    await t.run((ctx) => ctx.db.patch(emailId, { status: "queued" }));
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ emailId: "usesend_1", status: "queued" }],
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await t.action(internal.lib.callUseSendAPIWithBatch, {
+      baseUrl: options.baseUrl,
+      requestTimeoutMs: options.requestTimeoutMs,
+      emails: [emailId],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://selfhosted.example.com/api/v1/emails/batch",
+      expect.anything(),
+    );
+  });
+
+  test("falls back to the client baseUrl when USESEND_BASE_URL is unbound", async () => {
+    vi.stubEnv("USESEND_BASE_URL", "");
+    const t = initConvexTest();
+    const emailId = await createManualEmail(t);
+    await t.run((ctx) => ctx.db.patch(emailId, { status: "queued" }));
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ emailId: "usesend_1", status: "queued" }],
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await t.action(internal.lib.callUseSendAPIWithBatch, {
+      baseUrl: options.baseUrl,
+      requestTimeoutMs: options.requestTimeoutMs,
+      emails: [emailId],
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${options.baseUrl}/api/v1/emails/batch`,
+      expect.anything(),
+    );
+  });
+
   test("rejects incomplete batch responses without marking emails sent", async () => {
     const t = initConvexTest();
     const firstId = await createManualEmail(t);

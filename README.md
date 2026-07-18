@@ -39,11 +39,11 @@ npm install @pulgueta/usesend-convex
 Create a [useSend](https://usesend.com) account and grab an API key. Set it to
 `USESEND_API_KEY` in your deployment environment.
 
-Next, add the component to your Convex app via `convex/convex.config.ts`. The
-component declares a `USESEND_API_KEY` environment variable that you bind when
-installing it — the recommended setup binds it by reference to your
-deployment's `USESEND_API_KEY` env var so the credential stays in deployment
-secret storage and is resolved at send time (it is never stored in component
+Next, add the component to your Convex app via `convex/convex.config.ts`.
+Every environment variable the component can use is declared on the component
+and bound when installing it — the recommended setup binds them by reference
+to your deployment's env vars so the credential stays in deployment secret
+storage and is resolved at send time (it is never stored in component
 documents):
 
 ```ts
@@ -54,14 +54,32 @@ import usesend from "@pulgueta/usesend-convex/convex.config.js";
 const app = defineApp({
   env: {
     USESEND_API_KEY: v.string(),
+    USESEND_BASE_URL: v.optional(v.string()),
   },
 });
 app.use(usesend, {
-  env: { USESEND_API_KEY: app.env.USESEND_API_KEY },
+  env: {
+    USESEND_API_KEY: app.env.USESEND_API_KEY,
+    // optionals
+    USESEND_BASE_URL: app.env.USESEND_BASE_URL,
+  },
 });
 
 export default app;
 ```
+
+The component's env vars:
+
+- `USESEND_API_KEY` (required): the useSend API key used by the durable batch
+  sender, resolved from deployment secret storage at send time.
+- `USESEND_BASE_URL` (optional): base URL for self-hosted useSend instances.
+  When bound and set it takes precedence for durable batch sends; otherwise
+  the per-instance `baseUrl` option (default `https://app.usesend.com`) is
+  used.
+
+`USESEND_WEBHOOK_SECRET` is intentionally not a component env var: webhook
+verification runs in your app's HTTP action (see below), so the secret is read
+app-side by the `UseSend` client.
 
 Then you can use it in your Convex functions:
 
