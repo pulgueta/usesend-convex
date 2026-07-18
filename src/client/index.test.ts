@@ -93,7 +93,6 @@ describe("UseSend client", () => {
     expect(emailId).toBe("email_1");
     expect(runMutation).toHaveBeenCalledWith(functions.sendEmail, {
       options: {
-        apiKey: "test-api-key",
         baseUrl: "https://app.usesend.com",
         initialBackoffMs: 30000,
         retryAttempts: 5,
@@ -118,6 +117,12 @@ describe("UseSend client", () => {
 
     await usesend.get(queryCtx(runQuery), emailId);
     expect(runQuery).toHaveBeenLastCalledWith(functions.get, { emailId });
+
+    // Regression for #4: the raw API key must never cross the component
+    // boundary, where it would be persisted in durable documents.
+    expect(JSON.stringify(runMutation.mock.calls)).not.toContain(
+      "test-api-key",
+    );
   });
 
   test("tracks a successful manual send with its provider ID", async () => {
@@ -148,7 +153,6 @@ describe("UseSend client", () => {
       functions.createManualEmail,
       {
         options: {
-          apiKey: "test-api-key",
           baseUrl: "https://app.usesend.com",
           initialBackoffMs: 30000,
           retryAttempts: 5,

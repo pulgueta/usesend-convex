@@ -30,17 +30,34 @@ export const vTemplate = v.object({
 });
 export type Template = Infer<typeof vTemplate>;
 
-// Validator for the runtime options used by the component.
+// Validator for the runtime options used by the component. The useSend API
+// key is deliberately absent: it is a secret and must never be accepted into
+// (or persisted by) the component's tables. The durable sender resolves it at
+// execution time from the component's declared `USESEND_API_KEY` environment
+// variable instead.
 export const vOptions = v.object({
   initialBackoffMs: v.number(),
   retryAttempts: v.number(),
   requestTimeoutMs: v.number(),
-  apiKey: v.string(),
   baseUrl: v.string(),
   onEmailEvent: v.optional(onEmailEvent),
 });
 
 export type RuntimeConfig = Infer<typeof vOptions>;
+
+// Stored variant of `vOptions` for the `emails` table. Versions <= 0.1.1
+// persisted the raw API key inside `options`; the optional legacy field keeps
+// schema validation passing for rows written by those versions so upgrades
+// don't fail. New rows never include it, and `lib.scrubApiKeys` removes it
+// from old rows.
+export const vStoredOptions = v.object({
+  initialBackoffMs: v.number(),
+  retryAttempts: v.number(),
+  requestTimeoutMs: v.number(),
+  apiKey: v.optional(v.string()),
+  baseUrl: v.string(),
+  onEmailEvent: v.optional(onEmailEvent),
+});
 
 const commonFields = {
   id: v.string(),

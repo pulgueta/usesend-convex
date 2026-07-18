@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import {
+  env,
   internalAction,
   mutation,
   type MutationCtx,
@@ -21,9 +22,11 @@ import {
 } from "./shared.js";
 import type { FunctionHandle } from "convex/server";
 import type { EmailEvent, RunMutationCtx, RunQueryCtx } from "./shared.js";
+import { paginator } from "convex-helpers/server/pagination";
 import { attemptToParse } from "./utils.js";
 import { computeEmailUpdateFromEvent, FINALIZED_EPOCH } from "./events.js";
 import { parseBatchResponse, runtimeConfigKey } from "./batch.js";
+import schema from "./schema.js";
 
 // Configuration constants
 const SEGMENT_MS = 125;
@@ -426,7 +429,6 @@ async function enqueueBatch(
     ctx,
     internal.lib.callUseSendAPIWithBatch,
     {
-      apiKey: options.apiKey,
       baseUrl: options.baseUrl,
       requestTimeoutMs: options.requestTimeoutMs,
       emails: emails.map((email) => email._id),
@@ -471,7 +473,7 @@ export const makeBatch = internalMutation({
       { options: RuntimeConfig; emails: Doc<"emails">[] }
     >();
     for (const email of emails) {
-      const key = await runtimeConfigKey(email.options);
+      const key = runtimeConfigKey(email.options);
       const batch = batches.get(key);
       if (batch) {
         batch.emails.push(email);
@@ -528,17 +530,39 @@ async function getAllContent(
   return new Map(docs.map((doc) => [doc.id, doc.content]));
 }
 
-// Call useSend batch API
+// Call useSend batch API. The API key is resolved from the component's
+// environment at execution time so the credential only ever lives in
+// deployment secret storage, never in component documents or function args.
 export const callUseSendAPIWithBatch = internalAction({
   args: {
-    apiKey: v.string(),
+    // Deprecated and ignored: accepted only so workpool jobs enqueued by
+    // <= 0.1.1 (whose persisted args still carry the key) pass validation
+    // while they drain after an upgrade. The env binding below is always
+    // the credential actually used.
+    apiKey: v.optional(v.string()),
     baseUrl: v.string(),
     requestTimeoutMs: v.number(),
     emails: v.array(v.id("emails")),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
-    const batchPayload = await createUseSendBatchPayload(ctx, args.emails);
+    const apiKey = env.USESEND_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        "USESEND_API_KEY is not set for the usesend component. Bind it in " +
+          "convex.config.ts: app.use(usesend, { env: { USESEND_API_KEY: ... } })",
+      );
+    }
+    // The optional USESEND_BASE_URL component binding, when set, is the
+    // deployment-level source of truth; otherwise use the client-provided
+    // per-instance base URL.
+    const baseUrl = env.USESEND_BASE_URL || args.baseUrl;
+
+    const batchPayload = await createUseSendBatchPayload(
+      ctx,
+      args.emails,
+      apiKey,
+    );
 
     if (batchPayload === null) {
       console.log("No emails to send in batch. All were cancelled or failed.");
@@ -551,10 +575,10 @@ export const callUseSendAPIWithBatch = internalAction({
     const timeout = setTimeout(() => controller.abort(), args.requestTimeoutMs);
     let response: Response;
     try {
-      response = await fetch(`${args.baseUrl}/api/v1/emails/batch`, {
+      response = await fetch(`${baseUrl}/api/v1/emails/batch`, {
         method: "POST",
         headers: {
-          Authorization: `Bearer ${args.apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
           "Content-Type": "application/json",
           "Idempotency-Key": args.emails[0].toString(),
         },
@@ -692,11 +716,31 @@ export const onEmailComplete = emailPool.defineOnComplete({
 async function createUseSendBatchPayload(
   ctx: ActionCtx,
   emailIds: Id<"emails">[],
+  apiKey: string,
 ): Promise<[Id<"emails">[], string] | null> {
   const allEmails = await ctx.runQuery(internal.lib.getEmailsByIds, {
     emailIds,
   });
-  const emails = allEmails.filter((e) => e.status === "queued");
+  const queued = allEmails.filter((e) => e.status === "queued");
+  // Rows enqueued by <= 0.1.1 may still carry a stored per-instance key. If
+  // it matches the bound credential the email drains normally; if not,
+  // sending it with the env credential could deliver through the wrong
+  // useSend account, so fail it explicitly instead.
+  const mismatched = queued.filter(
+    (e) => e.options.apiKey !== undefined && e.options.apiKey !== apiKey,
+  );
+  if (mismatched.length > 0) {
+    await ctx.runMutation(internal.lib.markEmailsFailed, {
+      emailIds: mismatched.map((e) => e._id),
+      errorMessage:
+        "Email was enqueued by a previous component version with an API key " +
+        "that does not match the component's USESEND_API_KEY binding. " +
+        "Re-enqueue it with current credentials.",
+    });
+  }
+  const emails = queued.filter(
+    (e) => e.options.apiKey === undefined || e.options.apiKey === apiKey,
+  );
   if (emails.length === 0) {
     return null;
   }
@@ -976,6 +1020,44 @@ export const cleanupAbandonedEmails = mutation({
     ) {
       await ctx.scheduler.runAfter(0, api.lib.cleanupAbandonedEmails, {
         olderThan,
+      });
+    }
+    return null;
+  },
+});
+
+// One-time migration for deployments upgrading from <= 0.1.1, which persisted
+// the raw useSend API key in `emails.options.apiKey`. Removes the legacy field
+// from stored rows in batches, rescheduling itself until the table has been
+// fully scanned. Safe to run repeatedly.
+export const scrubApiKeys = mutation({
+  args: { cursor: v.optional(v.string()) },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const SCRUB_BATCH_SIZE = 100;
+    // A real pagination cursor (not a _creationTime bound) so rows sharing a
+    // creation timestamp are never skipped across page boundaries. Built-in
+    // .paginate() is not supported inside components, so use the
+    // convex-helpers paginator.
+    const { page, isDone, continueCursor } = await paginator(ctx.db, schema)
+      .query("emails")
+      .paginate({ numItems: SCRUB_BATCH_SIZE, cursor: args.cursor ?? null });
+
+    let scrubbed = 0;
+    for (const email of page) {
+      if (email.options.apiKey !== undefined) {
+        const options = { ...email.options };
+        delete options.apiKey;
+        await ctx.db.patch(email._id, { options });
+        scrubbed += 1;
+      }
+    }
+    if (scrubbed > 0) {
+      console.log(`Scrubbed legacy API keys from ${scrubbed} emails`);
+    }
+    if (!isDone) {
+      await ctx.scheduler.runAfter(0, api.lib.scrubApiKeys, {
+        cursor: continueCursor,
       });
     }
     return null;
