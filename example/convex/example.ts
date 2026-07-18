@@ -1,5 +1,6 @@
 import {
   action,
+  internalAction,
   internalMutation,
   mutation,
   query,
@@ -138,6 +139,22 @@ export const getEmailStatus = query({
   handler: async (ctx, args) => {
     await requireExampleAdmin(ctx);
     return await usesend.status(ctx, args.emailId as EmailId);
+  },
+});
+
+// Read an email and its status from an action. Actions are a supported
+// context for `usesend.get` and `usesend.status` (issue #3 regression guard).
+export const confirmEmailFromAction = internalAction({
+  args: { emailId: v.string() },
+  returns: v.object({
+    found: v.boolean(),
+    status: v.union(vStatus, v.null()),
+  }),
+  handler: async (ctx, args) => {
+    const emailId = args.emailId as EmailId;
+    const email = await usesend.get(ctx, emailId);
+    const status = await usesend.status(ctx, emailId);
+    return { found: email !== null, status: status?.status ?? null };
   },
 });
 
