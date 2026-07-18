@@ -227,6 +227,66 @@ describe("api key persistence (issue #4)", () => {
     expect(JSON.stringify(docs)).not.toContain(TEST_API_KEY);
   });
 
+  test("scrubApiKeys keeps the stored key on active rows so mismatches still fail", async () => {
+    const t = initConvexTest();
+    const insertLegacy = (subject: string, status: "queued" | "sent") =>
+      t.run((ctx) =>
+        ctx.db.insert("emails", {
+          options: { ...options, apiKey: "some-other-key" },
+          from: "sender@example.com",
+          to: ["recipient@example.com"],
+          subject,
+          replyTo: [],
+          segment: Infinity,
+          status,
+          bounced: false,
+          complained: false,
+          failed: false,
+          deliveryDelayed: false,
+          opened: false,
+          clicked: false,
+          retentionAnchor: 0,
+          finalizedAt: 0,
+        }),
+      );
+    const activeId = await insertLegacy("Active", "queued");
+    const finalizedId = await insertLegacy("Finalized", "sent");
+
+    await t.mutation(api.lib.scrubApiKeys, {});
+
+    // Finalized rows are scrubbed; active rows keep the evidence the batch
+    // sender needs to detect a credential mismatch.
+    const [active, finalized] = await t.run((ctx) =>
+      Promise.all([ctx.db.get(activeId), ctx.db.get(finalizedId)]),
+    );
+    expect(finalized?.options.apiKey).toBeUndefined();
+    expect(active?.options.apiKey).toBe("some-other-key");
+
+    // The P1 upgrade race: even after a scrub run, the mismatched active row
+    // must still fail explicitly instead of being sent through the wrong
+    // useSend account with the env credential.
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    await t.action(internal.lib.callUseSendAPIWithBatch, {
+      baseUrl: options.baseUrl,
+      requestTimeoutMs: options.requestTimeoutMs,
+      emails: [activeId],
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(
+      await t.query(api.lib.getStatus, { emailId: activeId }),
+    ).toMatchObject({
+      status: "failed",
+      failed: true,
+      errorMessage: expect.stringContaining("does not match"),
+    });
+
+    // Once failed (finalized), a re-run finishes the scrub.
+    await t.mutation(api.lib.scrubApiKeys, {});
+    const drained = await t.run((ctx) => ctx.db.get(activeId));
+    expect(drained?.options.apiKey).toBeUndefined();
+  });
+
   test("legacy rows drain with the env key only when their stored key matches", async () => {
     const t = initConvexTest();
     const insertLegacy = (subject: string, apiKey: string) =>
