@@ -39,6 +39,9 @@
   keys are removed and must be re-enqueued after upgrading.
 - Component function and workpool arguments never accept an API key, including
   legacy argument shapes.
+- **Breaking**: REST list selectors now match the useSend OpenAPI document;
+  `domainId`, `emails`, and `ids` accept one scalar query value rather than an
+  array of repeated values.
 
 ## 0.1.1
 
