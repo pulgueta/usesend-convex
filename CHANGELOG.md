@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- `sendReactEmail` and `renderEmail` accept any `ReactNode` (or a promise of
+  one) instead of only `ReactElement`. Components typed as `React.FC` — whose
+  direct calls return `ReactNode | Promise<ReactNode>` under React 19 types —
+  can now be passed as `MyEmail({ ... })` without a `createElement` workaround.
+- Export the `RunMutationCtx` and `RunQueryCtx` context types from the package
+  root, and `RunMutationCtx` from `./react-email`, so app-side send helpers can
+  type their `ctx` parameter directly.
+- **Breaking**: the `./react-email` module now renders with your app's
+  `react-email` install (a new optional peer dependency, `^6.0.0`) instead of a
+  bundled `@react-email/render` dependency, so there is a single render
+  implementation shared with your templates. `renderEmail` also rejects a
+  `react` value that is `null`, `undefined`, or a boolean instead of silently
+  enqueueing a blank email.
+
 ## 0.2.0
 
 - **Security** (#4): stop persisting the raw useSend API key in durable `emails`

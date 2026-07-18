@@ -375,7 +375,8 @@ components; `sendReactEmail` renders them to email-client-safe HTML **plus a
 plain-text fallback** (better accessibility and deliverability) and enqueues
 them through the durable send pipeline.
 
-Install React Email in your app to author templates:
+Install React Email in your app to author templates (the `./react-email`
+module is an optional peer — it renders with your app's `react-email` install):
 
 ```sh
 npm install react-email react-dom -E
@@ -434,6 +435,13 @@ export const sendWelcomeEmail = internalAction({
   },
 });
 ```
+
+In a plain `.ts` action (no JSX), call the component directly instead:
+`react: WelcomeEmail({ name: args.name })`. This also works for components
+typed as `React.FC`, as long as the component doesn't call hooks (a direct
+call runs outside React's renderer). And if you'd rather render yourself —
+e.g. with react-email's `render` — pass the output straight to
+`usesend.sendEmail(ctx, { html, ... })`.
 
 If you only want the rendered output (e.g. to pass to
 `usesend.api.emails.send` with attachments), use `renderEmail`:
