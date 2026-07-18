@@ -1029,7 +1029,11 @@ export const cleanupAbandonedEmails = mutation({
 // One-time migration for deployments upgrading from <= 0.1.1, which persisted
 // the raw useSend API key in `emails.options.apiKey`. Removes the legacy field
 // from stored rows in batches, rescheduling itself until the table has been
-// fully scanned. Safe to run repeatedly.
+// fully scanned. Safe to run repeatedly, and safe to run while legacy emails
+// are still in flight: rows that are still `waiting` or `queued` keep their
+// stored key so the batch sender can detect (and explicitly fail) emails that
+// were enqueued under a different credential than the component's
+// USESEND_API_KEY binding. Re-run after those rows drain to finish scrubbing.
 export const scrubApiKeys = mutation({
   args: { cursor: v.optional(v.string()) },
   returns: v.null(),
@@ -1045,7 +1049,8 @@ export const scrubApiKeys = mutation({
 
     let scrubbed = 0;
     for (const email of page) {
-      if (email.options.apiKey !== undefined) {
+      const active = email.status === "waiting" || email.status === "queued";
+      if (email.options.apiKey !== undefined && !active) {
         const options = { ...email.options };
         delete options.apiKey;
         await ctx.db.patch(email._id, { options });

@@ -34,8 +34,11 @@
 
 - Deployments upgrading with retained emails from `<= 0.1.1` keep passing
   schema validation (the legacy stored field is tolerated but never written).
-  Run the new `lib.scrubApiKeys` component mutation once to strip previously
-  persisted keys from old rows.
+  Run the new `lib.scrubApiKeys` component mutation to strip previously
+  persisted keys from old rows. It is safe to run at any time: rows still
+  `waiting` or `queued` keep their stored key so the mismatch guard below
+  stays effective while they drain — re-run the mutation afterwards to finish
+  scrubbing.
 - In-flight emails enqueued by `<= 0.1.1` drain with the newly bound
   credential when their stored key matches it; if the stored key differs
   (per-instance multi-key setups), the email is failed explicitly with a
