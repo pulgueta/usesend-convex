@@ -8,10 +8,12 @@
  * Rendering uses `react-dom/server`, so these helpers must run inside an
  * action. Use a `"use node"` action for maximum compatibility.
  */
-import { render } from "@react-email/render";
-import type { ReactElement } from "react";
+import { render } from "react-email";
+import type { ReactNode } from "react";
 import type { RunMutationCtx } from "../component/shared.js";
 import type { EmailId, UseSend } from "../client/index.js";
+
+export type { RunMutationCtx } from "../component/shared.js";
 
 export type RenderedEmail = {
   /** The email rendered as client-compatible HTML. */
@@ -26,13 +28,20 @@ export type RenderedEmail = {
 /**
  * Renders a React Email element into HTML and a plain-text fallback.
  *
- * @param element The React element to render, e.g. `<WelcomeEmail name="Ada" />`.
+ * @param element The React node to render, e.g. `<WelcomeEmail name="Ada" />`
+ * or `WelcomeEmail({ name: "Ada" })`.
  * @returns {@link RenderedEmail} with both representations.
  */
-export async function renderEmail(element: ReactElement): Promise<RenderedEmail> {
+export async function renderEmail(
+  element: ReactNode | Promise<ReactNode>,
+): Promise<RenderedEmail> {
+  const node = await element;
+  if (node == null || typeof node === "boolean") {
+    throw new Error("The provided React node rendered no content");
+  }
   const [html, text] = await Promise.all([
-    render(element),
-    render(element, { plainText: true }),
+    render(node),
+    render(node, { plainText: true }),
   ]);
   return { html, text };
 }
@@ -43,8 +52,8 @@ export type SendReactEmailOptions = {
   cc?: string | string[];
   bcc?: string | string[];
   subject: string;
-  /** The React element to render into the email's HTML and text bodies. */
-  react: ReactElement;
+  /** The React node to render into the email's HTML and text bodies. */
+  react: ReactNode | Promise<ReactNode>;
   replyTo?: string[];
   headers?: Record<string, string>;
   /** ISO 8601 timestamp to schedule delivery. */
