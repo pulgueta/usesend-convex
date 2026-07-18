@@ -59,11 +59,11 @@ export type UseSendOptions = {
    * The API key to use for the useSend API.
    * If not provided, the API key will be read from the environment variable USESEND_API_KEY.
    *
-   * This key is used app-side only: by the direct REST client ({@link UseSend.api}),
-   * by manual sends, and as a preflight check before enqueueing durable emails.
-   * It is never forwarded to (or persisted by) the component. Durable batch
-   * sends use the component's own `USESEND_API_KEY` environment variable,
-   * bound in `convex.config.ts` via
+   * This key is used app-side only by the direct REST client
+   * ({@link UseSend.api}) and any manual-send callback that uses it. It is never
+   * forwarded to (or persisted by) the component. Durable batch sends use the
+   * component's own `USESEND_API_KEY` environment variable, bound in
+   * `convex.config.ts` via
    * `app.use(usesend, { env: { USESEND_API_KEY: ... } })`.
    */
   apiKey?: string;
@@ -339,8 +339,6 @@ export class UseSend {
     ctx: RunMutationCtx,
     options: SendEmailOptions,
   ): Promise<EmailId> {
-    if (this.config.apiKey === "") throw new Error("API key is not set");
-
     const id = await ctx.runMutation(this.component.lib.sendEmail, {
       options: await configToRuntimeConfig(this.config, this.onEmailEvent),
       ...options,

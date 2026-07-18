@@ -67,9 +67,9 @@ export const handleEmailEvent = internalMutation({
   },
 });
 
-// Initialize the useSend component
-// Environment variables aren't available in the component,
-// so we need to configure it here with environment variable access.
+// Initialize the app-side useSend client. Durable sends resolve their API key
+// from the component env binding configured in convex.config.ts; app-side
+// options here are for direct REST calls, webhook verification, and callbacks.
 export const usesend: UseSend = new UseSend(components.usesend, {
   // Optionally override settings:
   // apiKey: process.env.USESEND_API_KEY,

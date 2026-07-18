@@ -34,8 +34,13 @@ export default defineSchema({
     event: vEmailEvent,
     attempts: v.number(),
   }).index("by_eventId", ["eventId"]),
+  migrationLeases: defineTable({
+    name: v.string(),
+    expiresAt: v.number(),
+  }).index("by_name", ["name"]),
   emails: defineTable({
-    // Never contains the raw API key; see `vStoredOptions` in shared.ts.
+    // New writes never contain the raw API key. Legacy rows may retain it
+    // temporarily until `scrubApiKeys` can safely remove it.
     options: vStoredOptions,
     from: v.string(),
     to: v.union(v.array(v.string()), v.string()),

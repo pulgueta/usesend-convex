@@ -1,15 +1,12 @@
 /// <reference types="vite/client" />
 
-// Regression suite for https://github.com/pulgueta/usesend-convex/issues/4:
-// raw useSend API keys must never be persisted in component documents. The
-// durable sender resolves the credential at execution time from the
-// component's USESEND_API_KEY environment variable instead.
+// Regression suite for https://github.com/pulgueta/usesend-convex/issues/4.
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { api, internal } from "./_generated/api.js";
 import type { RuntimeConfig } from "./shared.js";
 import schema from "./schema.js";
-import { initConvexTest } from "./setup.test.js";
+import { initConvexTest } from "./test.setup.js";
 
 const TEST_API_KEY = "us_test_plaintext_secret_key";
 
@@ -31,6 +28,25 @@ async function collectAllDocuments(t: ReturnType<typeof initConvexTest>) {
     }
     return docs;
   });
+}
+
+async function collectEmailWorkpoolDocuments(
+  t: ReturnType<typeof initConvexTest>,
+) {
+  const scoped = t as typeof t & {
+    runInComponent: <Output>(
+      path: string,
+      handler: (ctx: {
+        db: {
+          query: (table: string) => { collect: () => Promise<unknown[]> };
+        };
+      }) => Promise<Output>,
+    ) => Promise<Output>;
+  };
+  return scoped.runInComponent("emailWorkpool", async (ctx) => ({
+    work: await ctx.db.query("work").collect(),
+    payload: await ctx.db.query("payload").collect(),
+  }));
 }
 
 describe("api key persistence (issue #4)", () => {
@@ -55,8 +71,14 @@ describe("api key persistence (issue #4)", () => {
       html: "<p>Hello</p>",
     });
 
-    // Drive the email through the batch API call the way the workpool would.
-    await t.run((ctx) => ctx.db.patch(emailId, { status: "queued" }));
+    await t.mutation(internal.lib.makeBatch, {
+      reloop: false,
+      segment: Infinity,
+    });
+    const durableJob = await collectEmailWorkpoolDocuments(t);
+    expect(JSON.stringify(durableJob)).not.toContain(TEST_API_KEY);
+    expect(durableJob.work).toHaveLength(1);
+
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
@@ -71,14 +93,12 @@ describe("api key persistence (issue #4)", () => {
       emails: [emailId],
     });
 
-    // The credential was used for the provider call...
     expect(fetchMock).toHaveBeenCalledOnce();
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(
-      (init.headers as Record<string, string>)["Authorization"],
-    ).toBe(`Bearer ${TEST_API_KEY}`);
+    expect((init.headers as Record<string, string>)["Authorization"]).toBe(
+      `Bearer ${TEST_API_KEY}`,
+    );
 
-    // ...but no durable document in any component table contains it.
     const docs = await collectAllDocuments(t);
     expect(JSON.stringify(docs)).not.toContain(TEST_API_KEY);
     expect(docs.emails).toHaveLength(1);
@@ -149,7 +169,6 @@ describe("api key persistence (issue #4)", () => {
   test("scrubApiKeys strips legacy plaintext keys from stored rows", async () => {
     const t = initConvexTest();
 
-    // A row written by <= 0.1.1, where options carried the raw key.
     const legacyId = await t.run((ctx) =>
       ctx.db.insert("emails", {
         options: { ...options, apiKey: TEST_API_KEY },
@@ -177,6 +196,7 @@ describe("api key persistence (issue #4)", () => {
     });
 
     await t.mutation(api.lib.scrubApiKeys, {});
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
 
     const [legacy, modern] = await t.run((ctx) =>
       Promise.all([ctx.db.get(legacyId), ctx.db.get(modernId)]),
@@ -190,8 +210,6 @@ describe("api key persistence (issue #4)", () => {
   test("scrubApiKeys paginates past batches of rows sharing a creation time", async () => {
     const t = initConvexTest();
 
-    // With fake timers frozen, bulk inserts share a creation timestamp —
-    // the scenario where a plain _creationTime cursor would skip rows.
     const ROWS = 150;
     await t.run(async (ctx) => {
       for (let i = 0; i < ROWS; i++) {
@@ -216,6 +234,10 @@ describe("api key persistence (issue #4)", () => {
     });
 
     await t.mutation(api.lib.scrubApiKeys, {});
+    await t.mutation(api.lib.scrubApiKeys, {});
+    expect(
+      await t.run((ctx) => ctx.db.query("migrationLeases").collect()),
+    ).toHaveLength(1);
     await t.finishAllScheduledFunctions(vi.runAllTimers);
 
     const remaining = await t.run(async (ctx) => {
@@ -223,11 +245,14 @@ describe("api key persistence (issue #4)", () => {
       return emails.filter((email) => email.options.apiKey !== undefined);
     });
     expect(remaining).toHaveLength(0);
+    expect(
+      await t.run((ctx) => ctx.db.query("migrationLeases").collect()),
+    ).toHaveLength(0);
     const docs = await collectAllDocuments(t);
     expect(JSON.stringify(docs)).not.toContain(TEST_API_KEY);
   });
 
-  test("scrubApiKeys keeps the stored key on active rows so mismatches still fail", async () => {
+  test("scrubApiKeys fails active legacy rows while removing their keys", async () => {
     const t = initConvexTest();
     const insertLegacy = (subject: string, status: "queued" | "sent") =>
       t.run((ctx) =>
@@ -253,129 +278,64 @@ describe("api key persistence (issue #4)", () => {
     const finalizedId = await insertLegacy("Finalized", "sent");
 
     await t.mutation(api.lib.scrubApiKeys, {});
+    await t.finishAllScheduledFunctions(vi.runAllTimers);
 
-    // Finalized rows are scrubbed; active rows keep the evidence the batch
-    // sender needs to detect a credential mismatch.
     const [active, finalized] = await t.run((ctx) =>
       Promise.all([ctx.db.get(activeId), ctx.db.get(finalizedId)]),
     );
     expect(finalized?.options.apiKey).toBeUndefined();
-    expect(active?.options.apiKey).toBe("some-other-key");
+    expect(active).toMatchObject({
+      options,
+      status: "failed",
+      failed: true,
+      errorMessage: expect.stringContaining("previous component version"),
+    });
+    expect(JSON.stringify(await collectAllDocuments(t))).not.toContain(
+      "some-other-key",
+    );
+  });
 
-    // The P1 upgrade race: even after a scrub run, the mismatched active row
-    // must still fail explicitly instead of being sent through the wrong
-    // useSend account with the env credential.
+  test("the batch sender rejects and scrubs legacy queued rows", async () => {
+    const t = initConvexTest();
+    const emailId = await t.run((ctx) =>
+      ctx.db.insert("emails", {
+        options: { ...options, apiKey: TEST_API_KEY },
+        from: "sender@example.com",
+        to: ["recipient@example.com"],
+        subject: "Legacy",
+        replyTo: [],
+        segment: Infinity,
+        status: "queued",
+        bounced: false,
+        complained: false,
+        failed: false,
+        deliveryDelayed: false,
+        opened: false,
+        clicked: false,
+        retentionAnchor: 0,
+        finalizedAt: 0,
+      }),
+    );
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    await t.action(internal.lib.callUseSendAPIWithBatch, {
-      baseUrl: options.baseUrl,
-      requestTimeoutMs: options.requestTimeoutMs,
-      emails: [activeId],
+
+    const queryResult = await t.query(internal.lib.getEmailsByIds, {
+      emailIds: [emailId],
     });
-    expect(fetchMock).not.toHaveBeenCalled();
-    expect(
-      await t.query(api.lib.getStatus, { emailId: activeId }),
-    ).toMatchObject({
-      status: "failed",
-      failed: true,
-      errorMessage: expect.stringContaining("does not match"),
-    });
-
-    // Once failed (finalized), a re-run finishes the scrub.
-    await t.mutation(api.lib.scrubApiKeys, {});
-    const drained = await t.run((ctx) => ctx.db.get(activeId));
-    expect(drained?.options.apiKey).toBeUndefined();
-  });
-
-  test("legacy rows drain with the env key only when their stored key matches", async () => {
-    const t = initConvexTest();
-    const insertLegacy = (subject: string, apiKey: string) =>
-      t.run((ctx) =>
-        ctx.db.insert("emails", {
-          options: { ...options, apiKey },
-          from: "sender@example.com",
-          to: ["recipient@example.com"],
-          subject,
-          replyTo: [],
-          segment: Infinity,
-          status: "queued",
-          bounced: false,
-          complained: false,
-          failed: false,
-          deliveryDelayed: false,
-          opened: false,
-          clicked: false,
-          retentionAnchor: 0,
-          finalizedAt: 0,
-        }),
-      );
-    // Stored key matches the bound credential: drains normally.
-    const matchingId = await insertLegacy("Matching", TEST_API_KEY);
-    // Stored key differs (a <= 0.1.1 multi-instance setup): must not be
-    // silently delivered through the wrong useSend account.
-    const mismatchedId = await insertLegacy("Mismatched", "some-other-key");
-
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          data: [{ emailId: "usesend_1", status: "queued" }],
-        }),
-      ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
+    expect(queryResult[0]).toMatchObject({ legacyApiKey: true, options });
+    expect(JSON.stringify(queryResult)).not.toContain(TEST_API_KEY);
 
     await t.action(internal.lib.callUseSendAPIWithBatch, {
-      baseUrl: options.baseUrl,
-      requestTimeoutMs: options.requestTimeoutMs,
-      emails: [matchingId, mismatchedId],
-    });
-
-    expect(await t.query(api.lib.getStatus, { emailId: matchingId })).toMatchObject(
-      { status: "sent" },
-    );
-    expect(
-      await t.query(api.lib.getStatus, { emailId: mismatchedId }),
-    ).toMatchObject({
-      status: "failed",
-      failed: true,
-      errorMessage: expect.stringContaining("does not match"),
-    });
-    // Only the matching email went to the provider.
-    expect(fetchMock).toHaveBeenCalledOnce();
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(JSON.parse(init.body as string)).toHaveLength(1);
-  });
-
-  test("the batch sender tolerates and ignores a legacy apiKey arg", async () => {
-    const t = initConvexTest();
-    const emailId = await t.mutation(api.lib.createManualEmail, {
-      options,
-      from: "sender@example.com",
-      to: "recipient@example.com",
-      subject: "Hello",
-    });
-    await t.run((ctx) => ctx.db.patch(emailId, { status: "queued" }));
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          data: [{ emailId: "usesend_1", status: "queued" }],
-        }),
-      ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    // Workpool jobs enqueued by <= 0.1.1 still carry apiKey in their
-    // persisted args; they must pass validation and use the env credential.
-    await t.action(internal.lib.callUseSendAPIWithBatch, {
-      apiKey: "stale-legacy-key",
       baseUrl: options.baseUrl,
       requestTimeoutMs: options.requestTimeoutMs,
       emails: [emailId],
     });
 
-    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect((init.headers as Record<string, string>)["Authorization"]).toBe(
-      `Bearer ${TEST_API_KEY}`,
-    );
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(await t.run((ctx) => ctx.db.get(emailId))).toMatchObject({
+      options,
+      status: "failed",
+      failed: true,
+    });
   });
 });

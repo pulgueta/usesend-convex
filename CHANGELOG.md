@@ -2,10 +2,9 @@
 
 ## Unreleased
 
-- **Security** (#4): stop persisting the raw useSend API key in durable
-  `emails` documents. The component now declares a `USESEND_API_KEY`
-  environment variable and resolves the credential at send time from
-  deployment secret storage.
+- **Security** (#4): stop persisting the raw useSend API key in durable `emails`
+  documents. The component now declares a `USESEND_API_KEY` environment variable
+  and resolves the credential at send time from deployment secret storage.
 - **Breaking**: the component now declares every env var it can use
   (`USESEND_API_KEY`, required; `USESEND_BASE_URL`, optional), and apps must
   bind them when installing it in `convex/convex.config.ts`:
@@ -25,25 +24,21 @@
   });
   ```
 
-  A bound `USESEND_BASE_URL` takes precedence over the client-provided
-  `baseUrl` for durable batch sends. (`USESEND_WEBHOOK_SECRET` remains
-  app-side: webhook verification runs in the app's HTTP action.)
+  A bound `USESEND_BASE_URL` takes precedence over the client-provided `baseUrl`
+  for durable batch sends. (`USESEND_WEBHOOK_SECRET` remains app-side: webhook
+  verification runs in the app's HTTP action.)
 
-  The `apiKey` client option is now app-side only (direct REST client, manual
-  sends, and a preflight check) and is no longer forwarded to the component.
+  The `apiKey` client option is now app-side only (direct REST client and
+  manual-send callbacks) and is no longer forwarded to the component.
 
-- Deployments upgrading with retained emails from `<= 0.1.1` keep passing
-  schema validation (the legacy stored field is tolerated but never written).
-  Run the new `lib.scrubApiKeys` component mutation to strip previously
-  persisted keys from old rows. It is safe to run at any time: rows still
-  `waiting` or `queued` keep their stored key so the mismatch guard below
-  stays effective while they drain — re-run the mutation afterwards to finish
-  scrubbing.
-- In-flight emails enqueued by `<= 0.1.1` drain with the newly bound
-  credential when their stored key matches it; if the stored key differs
-  (per-instance multi-key setups), the email is failed explicitly with a
-  clear error instead of being silently sent through the wrong useSend
-  account.
+- Deployments upgrading with retained emails from `<= 0.1.1` keep passing schema
+  validation (the legacy stored field is tolerated but never written). Run the
+  new `lib.scrubApiKeys` component mutation from an authenticated app mutation
+  to strip previously persisted keys from old rows. A migration lease prevents
+  overlapping scans. Legacy `waiting` or `queued` rows are failed while their
+  keys are removed and must be re-enqueued after upgrading.
+- Component function and workpool arguments never accept an API key, including
+  legacy argument shapes.
 
 ## 0.1.1
 
