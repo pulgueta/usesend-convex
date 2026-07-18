@@ -38,6 +38,6 @@ jobs:
             echo "Have you set up pkg-pr-new for this repo?"
       - name: Test
         run: |
-          pnpm test
+          pnpm test:coverage
           pnpm typecheck
           pnpm lint

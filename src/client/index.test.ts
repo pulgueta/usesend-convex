@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { type EmailEvent, type EmailId, UseSend } from "./index.js";
-import { components, initConvexTest } from "./setup.test.js";
+import { components, initConvexTest } from "../../example/convex/test.setup.js";
 
 function createClient() {
   return new UseSend(components.usesend, {
@@ -61,10 +61,16 @@ async function signedWebhookRequest(secret: string, event: EmailEvent) {
 }
 
 describe("UseSend client", () => {
-  test("uses the documented defaults", () => {
-    const usesend = new UseSend(components.usesend, { apiKey: "test-api-key" });
+  test("uses the documented defaults", async () => {
+    const t = initConvexTest();
+    const config = await t.action(async () => {
+      const usesend = new UseSend(components.usesend, {
+        apiKey: "test-api-key",
+      });
+      return usesend.config;
+    });
 
-    expect(usesend.config).toMatchObject({
+    expect(config).toMatchObject({
       initialBackoffMs: 30000,
       retryAttempts: 5,
       requestTimeoutMs: 30000,
@@ -72,17 +78,21 @@ describe("UseSend client", () => {
     });
   });
 
-  test("accepts custom options", () => {
-    const usesend = new UseSend(components.usesend, {
-      apiKey: "test-api-key",
-      baseUrl: "https://custom.usesend.com",
-      initialBackoffMs: 60000,
-      retryAttempts: 10,
-      requestTimeoutMs: 10000,
-      webhookSecret: "test-webhook-secret",
+  test("accepts custom options", async () => {
+    const t = initConvexTest();
+    const config = await t.action(async () => {
+      const usesend = new UseSend(components.usesend, {
+        apiKey: "test-api-key",
+        baseUrl: "https://custom.usesend.com",
+        initialBackoffMs: 60000,
+        retryAttempts: 10,
+        requestTimeoutMs: 10000,
+        webhookSecret: "test-webhook-secret",
+      });
+      return usesend.config;
     });
 
-    expect(usesend.config).toMatchObject({
+    expect(config).toMatchObject({
       apiKey: "test-api-key",
       baseUrl: "https://custom.usesend.com",
       initialBackoffMs: 60000,
@@ -116,6 +126,24 @@ describe("UseSend client", () => {
       to: ["recipient@example.com"],
       subject: "Hello",
       text: "Hello",
+    });
+  });
+
+  test("does not require an app-side API key for durable sends", async () => {
+    const t = initConvexTest();
+    const usesend = new UseSend(components.usesend, { apiKey: "" });
+
+    const emailId = await t.run((ctx) =>
+      usesend.sendEmail(ctx, {
+        from: "sender@example.com",
+        to: "recipient@example.com",
+        subject: "Hello",
+        text: "Hello",
+      }),
+    );
+
+    expect(await t.run((ctx) => usesend.status(ctx, emailId))).toMatchObject({
+      status: "waiting",
     });
   });
 
