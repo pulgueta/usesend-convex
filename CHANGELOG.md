@@ -36,6 +36,11 @@
   schema validation (the legacy stored field is tolerated but never written).
   Run the new `lib.scrubApiKeys` component mutation once to strip previously
   persisted keys from old rows.
+- In-flight emails enqueued by `<= 0.1.1` drain with the newly bound
+  credential when their stored key matches it; if the stored key differs
+  (per-instance multi-key setups), the email is failed explicitly with a
+  clear error instead of being silently sent through the wrong useSend
+  account.
 
 ## 0.1.1
 

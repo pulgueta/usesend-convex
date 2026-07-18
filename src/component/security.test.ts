@@ -227,6 +227,65 @@ describe("api key persistence (issue #4)", () => {
     expect(JSON.stringify(docs)).not.toContain(TEST_API_KEY);
   });
 
+  test("legacy rows drain with the env key only when their stored key matches", async () => {
+    const t = initConvexTest();
+    const insertLegacy = (subject: string, apiKey: string) =>
+      t.run((ctx) =>
+        ctx.db.insert("emails", {
+          options: { ...options, apiKey },
+          from: "sender@example.com",
+          to: ["recipient@example.com"],
+          subject,
+          replyTo: [],
+          segment: Infinity,
+          status: "queued",
+          bounced: false,
+          complained: false,
+          failed: false,
+          deliveryDelayed: false,
+          opened: false,
+          clicked: false,
+          retentionAnchor: 0,
+          finalizedAt: 0,
+        }),
+      );
+    // Stored key matches the bound credential: drains normally.
+    const matchingId = await insertLegacy("Matching", TEST_API_KEY);
+    // Stored key differs (a <= 0.1.1 multi-instance setup): must not be
+    // silently delivered through the wrong useSend account.
+    const mismatchedId = await insertLegacy("Mismatched", "some-other-key");
+
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          data: [{ emailId: "usesend_1", status: "queued" }],
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await t.action(internal.lib.callUseSendAPIWithBatch, {
+      baseUrl: options.baseUrl,
+      requestTimeoutMs: options.requestTimeoutMs,
+      emails: [matchingId, mismatchedId],
+    });
+
+    expect(await t.query(api.lib.getStatus, { emailId: matchingId })).toMatchObject(
+      { status: "sent" },
+    );
+    expect(
+      await t.query(api.lib.getStatus, { emailId: mismatchedId }),
+    ).toMatchObject({
+      status: "failed",
+      failed: true,
+      errorMessage: expect.stringContaining("does not match"),
+    });
+    // Only the matching email went to the provider.
+    expect(fetchMock).toHaveBeenCalledOnce();
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string)).toHaveLength(1);
+  });
+
   test("the batch sender tolerates and ignores a legacy apiKey arg", async () => {
     const t = initConvexTest();
     const emailId = await t.mutation(api.lib.createManualEmail, {

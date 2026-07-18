@@ -22,9 +22,11 @@ import {
 } from "./shared.js";
 import type { FunctionHandle } from "convex/server";
 import type { EmailEvent, RunMutationCtx, RunQueryCtx } from "./shared.js";
+import { paginator } from "convex-helpers/server/pagination";
 import { attemptToParse } from "./utils.js";
 import { computeEmailUpdateFromEvent, FINALIZED_EPOCH } from "./events.js";
 import { parseBatchResponse, runtimeConfigKey } from "./batch.js";
+import schema from "./schema.js";
 
 // Configuration constants
 const SEGMENT_MS = 125;
@@ -556,7 +558,11 @@ export const callUseSendAPIWithBatch = internalAction({
     // per-instance base URL.
     const baseUrl = env.USESEND_BASE_URL || args.baseUrl;
 
-    const batchPayload = await createUseSendBatchPayload(ctx, args.emails);
+    const batchPayload = await createUseSendBatchPayload(
+      ctx,
+      args.emails,
+      apiKey,
+    );
 
     if (batchPayload === null) {
       console.log("No emails to send in batch. All were cancelled or failed.");
@@ -710,11 +716,31 @@ export const onEmailComplete = emailPool.defineOnComplete({
 async function createUseSendBatchPayload(
   ctx: ActionCtx,
   emailIds: Id<"emails">[],
+  apiKey: string,
 ): Promise<[Id<"emails">[], string] | null> {
   const allEmails = await ctx.runQuery(internal.lib.getEmailsByIds, {
     emailIds,
   });
-  const emails = allEmails.filter((e) => e.status === "queued");
+  const queued = allEmails.filter((e) => e.status === "queued");
+  // Rows enqueued by <= 0.1.1 may still carry a stored per-instance key. If
+  // it matches the bound credential the email drains normally; if not,
+  // sending it with the env credential could deliver through the wrong
+  // useSend account, so fail it explicitly instead.
+  const mismatched = queued.filter(
+    (e) => e.options.apiKey !== undefined && e.options.apiKey !== apiKey,
+  );
+  if (mismatched.length > 0) {
+    await ctx.runMutation(internal.lib.markEmailsFailed, {
+      emailIds: mismatched.map((e) => e._id),
+      errorMessage:
+        "Email was enqueued by a previous component version with an API key " +
+        "that does not match the component's USESEND_API_KEY binding. " +
+        "Re-enqueue it with current credentials.",
+    });
+  }
+  const emails = queued.filter(
+    (e) => e.options.apiKey === undefined || e.options.apiKey === apiKey,
+  );
   if (emails.length === 0) {
     return null;
   }
@@ -1010,8 +1036,10 @@ export const scrubApiKeys = mutation({
   handler: async (ctx, args) => {
     const SCRUB_BATCH_SIZE = 100;
     // A real pagination cursor (not a _creationTime bound) so rows sharing a
-    // creation timestamp are never skipped across page boundaries.
-    const { page, isDone, continueCursor } = await ctx.db
+    // creation timestamp are never skipped across page boundaries. Built-in
+    // .paginate() is not supported inside components, so use the
+    // convex-helpers paginator.
+    const { page, isDone, continueCursor } = await paginator(ctx.db, schema)
       .query("emails")
       .paginate({ numItems: SCRUB_BATCH_SIZE, cursor: args.cursor ?? null });
 
