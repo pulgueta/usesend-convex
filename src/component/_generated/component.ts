@@ -140,6 +140,13 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
         null,
         Name
       >;
+      scrubApiKeys: FunctionReference<
+        "mutation",
+        "internal",
+        { cursor?: string },
+        null,
+        Name
+      >;
       sendEmail: FunctionReference<
         "mutation",
         "internal",
@@ -168,13 +175,6 @@ export type ComponentApi<Name extends string | undefined = string | undefined> =
           to: Array<string>;
         },
         string,
-        Name
-      >;
-      scrubApiKeys: FunctionReference<
-        "mutation",
-        "internal",
-        { cursor?: string },
-        null,
         Name
       >;
       updateManualEmail: FunctionReference<
