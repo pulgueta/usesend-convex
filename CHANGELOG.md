@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1
 
 - `sendReactEmail` and `renderEmail` accept any `ReactNode` (or a promise of
   one) instead of only `ReactElement`. Components typed as `React.FC` — whose
@@ -12,9 +12,9 @@
 - **Breaking**: the `./react-email` module now renders with your app's
   `react-email` install (a new optional peer dependency, `^6.0.0`) instead of a
   bundled `@react-email/render` dependency, so there is a single render
-  implementation shared with your templates. `renderEmail` also rejects a
-  `react` value that is `null`, `undefined`, or a boolean instead of silently
-  enqueueing a blank email.
+  implementation shared with your templates. `renderEmail` also rejects nodes
+  that produce no HTML or text content instead of silently enqueueing a blank
+  email.
 
 ## 0.2.0
 
