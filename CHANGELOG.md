@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.1
+## 0.2.2
 
 - `sendReactEmail` and `renderEmail` accept any `ReactNode` (or a promise of
   one) instead of only `ReactElement`. Components typed as `React.FC` — whose
