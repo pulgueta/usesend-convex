@@ -1,8 +1,9 @@
+import type { FC } from "react";
 import { Html, Text } from "react-email";
 import { expect, test } from "vitest";
 import { components, initConvexTest } from "../../example/convex/test.setup.js";
 import { UseSend } from "../client/index.js";
-import { renderEmail, sendReactEmail } from "./index.js";
+import { renderEmail, sendReactEmail, type RunMutationCtx } from "./index.js";
 
 function TestEmail({ name }: { name: string }) {
   return (
@@ -11,6 +12,16 @@ function TestEmail({ name }: { name: string }) {
     </Html>
   );
 }
+
+// FC-typed components return ReactNode when called directly (React 19 types);
+// both entry points must accept them without createElement.
+const FcEmail: FC<{ name: string }> = ({ name }) => (
+  <Html lang="en">
+    <Text>{`Bye ${name}!`}</Text>
+  </Html>
+);
+
+const EmptyEmail: FC = () => null;
 
 test("renders React Email HTML and text from an action", async () => {
   const t = initConvexTest();
@@ -47,4 +58,29 @@ test("enqueues a rendered React Email through the component", async () => {
   });
   expect(email?.html).toContain("Hello Ada!");
   expect(email?.text).toContain("Hello Ada!");
+});
+
+test("rejects nodes that render no content", async () => {
+  await expect(renderEmail(null)).rejects.toThrow("rendered no content");
+  await expect(renderEmail(<EmptyEmail />)).rejects.toThrow(
+    "rendered no content",
+  );
+});
+
+test("accepts a direct call of an FC-typed component", async () => {
+  const t = initConvexTest();
+  const usesend = new UseSend(components.usesend, { apiKey: "" });
+
+  const emailId = await t.action((ctx: RunMutationCtx) =>
+    sendReactEmail(usesend, ctx, {
+      from: "from@example.com",
+      to: "ada@example.com",
+      subject: "Farewell",
+      react: FcEmail({ name: "Ada" }),
+    }),
+  );
+  const email = await t.run((ctx) => usesend.get(ctx, emailId));
+
+  expect(email?.html).toContain("Bye Ada!");
+  expect(email?.text).toContain("Bye Ada!");
 });

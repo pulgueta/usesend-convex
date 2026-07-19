@@ -78,10 +78,14 @@
   "peerDependencies": {
     "convex": "^1.42.0",
     "react": "^18.3.1 || ^19.0.0",
-    "react-dom": "^18.3.1 || ^19.0.0"
+    "react-dom": "^18.3.1 || ^19.0.0",
+    "react-email": "^6.0.0"
   },
   "peerDependenciesMeta": {
     "react-dom": {
+      "optional": true
+    },
+    "react-email": {
       "optional": true
     }
   },
@@ -121,7 +125,6 @@
   "dependencies": {
     "@convex-dev/rate-limiter": "^0.3.2",
     "@convex-dev/workpool": "^0.3.1",
-    "@react-email/render": "^2.1.0",
     "convex-helpers": "^0.1.76"
   }
 }

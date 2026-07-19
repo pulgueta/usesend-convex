@@ -8,6 +8,7 @@
  * @module
  */
 
+import type * as emailPatterns from "../emailPatterns.js";
 import type * as emails_welcome from "../emails/welcome.js";
 import type * as example from "../example.js";
 import type * as http from "../http.js";
@@ -20,6 +21,7 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  emailPatterns: typeof emailPatterns;
   "emails/welcome": typeof emails_welcome;
   example: typeof example;
   http: typeof http;

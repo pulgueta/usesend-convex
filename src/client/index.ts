@@ -32,7 +32,13 @@ export {
   vStatus,
   vTemplate,
 } from "../component/shared.js";
-export type { EmailEvent, Status, Template } from "../component/shared.js";
+export type {
+  EmailEvent,
+  RunMutationCtx,
+  RunQueryCtx,
+  Status,
+  Template,
+} from "../component/shared.js";
 export const vOnEmailEventArgs = v.object({
   id: vEmailId,
   event: vEmailEvent,
